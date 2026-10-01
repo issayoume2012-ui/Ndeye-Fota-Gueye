@@ -1,0 +1,3 @@
+-- Schéma indicatif.
+-- La première version crée automatiquement les tables dans SQLite depuis app.py.
+-- Ce fichier est fourni comme repère pour une future migration PostgreSQL/Supabase.
