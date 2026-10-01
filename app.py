@@ -1,10 +1,20 @@
 import streamlit as st
-import sqlite3
+import os
+import re
+import json
+import psycopg2
+from psycopg2 import pool as pg_pool
 from pathlib import Path
 from datetime import date, datetime, timedelta
 import pandas as pd
 import io
 import hashlib
+
+try:
+    from supabase import create_client, Client
+    SUPABASE_AVAILABLE = True
+except ImportError:
+    SUPABASE_AVAILABLE = False
 
 try:
     from reportlab.lib import colors
@@ -17,9 +27,127 @@ except ImportError:
     REPORTLAB_AVAILABLE = False
 
 APP_DIR = Path(__file__).resolve().parent
-DB_PATH = APP_DIR / "registre_cra_isra.db"
-UPLOAD_DIR = APP_DIR / "uploads"
-UPLOAD_DIR.mkdir(exist_ok=True)
+
+# ============================================================
+# CONFIGURATION SUPABASE / POSTGRESQL
+# ============================================================
+# Les secrets sont lus depuis st.secrets (Streamlit Cloud) ou
+# les variables d'environnement. Aucun mot de passe n'est écrit
+# dans le code source.
+DATABASE_URL = st.secrets.get("SUPABASE_DB_URL", os.getenv("SUPABASE_DB_URL", "")).strip()
+
+SUPABASE_URL = st.secrets.get("SUPABASE_URL", os.getenv("SUPABASE_URL", "")).strip()
+SUPABASE_SERVICE_ROLE_KEY = st.secrets.get(
+    "SUPABASE_SERVICE_ROLE_KEY",
+    os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+).strip()
+if not SUPABASE_SERVICE_ROLE_KEY:
+    SUPABASE_SERVICE_ROLE_KEY = st.secrets.get(
+        "SUPABASE_KEY", os.getenv("SUPABASE_KEY", "")
+    ).strip()
+SUPABASE_BUCKET = st.secrets.get(
+    "SUPABASE_STORAGE_BUCKET",
+    os.getenv("SUPABASE_STORAGE_BUCKET", "cra-isra-files")
+).strip()
+
+DB_POOL = None
+SUPABASE_CLIENT = None
+
+def get_database_url():
+    """Construit l'URL PostgreSQL depuis le secret complet ou les paramètres séparés."""
+    if DATABASE_URL:
+        return DATABASE_URL
+    host = st.secrets.get("PGHOST", os.getenv("PGHOST", "")).strip()
+    port = st.secrets.get("PGPORT", os.getenv("PGPORT", "5432")).strip()
+    database = st.secrets.get("PGDATABASE", os.getenv("PGDATABASE", "postgres")).strip()
+    user = st.secrets.get("PGUSER", os.getenv("PGUSER", "")).strip()
+    password = st.secrets.get("PGPASSWORD", os.getenv("PGPASSWORD", "")).strip()
+    if all([host, port, database, user, password]):
+        from urllib.parse import quote_plus
+        return f"postgresql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{database}"
+    return ""
+
+def init_postgres_pool():
+    global DB_POOL
+    url = get_database_url()
+    if not url:
+        raise RuntimeError(
+            "SUPABASE_DB_URL est absent. Ajoutez-le dans Streamlit Cloud > Settings > Secrets."
+        )
+    if DB_POOL is None:
+        DB_POOL = pg_pool.ThreadedConnectionPool(1, 8, dsn=url, connect_timeout=10)
+    return DB_POOL
+
+def get_conn():
+    pool = init_postgres_pool()
+    conn = pool.getconn()
+    conn.autocommit = False
+    return conn
+
+def put_conn(conn):
+    if DB_POOL is not None and conn is not None:
+        DB_POOL.putconn(conn)
+
+def init_supabase_storage():
+    global SUPABASE_CLIENT
+    if not SUPABASE_AVAILABLE or not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        return None
+    if SUPABASE_CLIENT is None:
+        SUPABASE_CLIENT = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+    return SUPABASE_CLIENT
+
+def ensure_storage_bucket():
+    """Crée le bucket privé si le client service-role est disponible."""
+    client = init_supabase_storage()
+    if client is None:
+        return False
+    try:
+        buckets = client.storage.list_buckets()
+        names = {getattr(b, "name", None) or (b.get("name") if isinstance(b, dict) else None) for b in buckets}
+        if SUPABASE_BUCKET not in names:
+            client.storage.create_bucket(SUPABASE_BUCKET, {"public": False})
+        return True
+    except Exception:
+        # Le bucket peut déjà exister ou la clé peut ne pas avoir le droit
+        # de créer des buckets. L'upload sera tenté normalement.
+        return True
+
+def upload_to_supabase(uploaded, subdir=""):
+    """Envoie le fichier lourd vers Supabase Storage et retourne son chemin."""
+    if uploaded is None:
+        return ""
+    client = init_supabase_storage()
+    if client is None:
+        raise RuntimeError(
+            "Supabase Storage n'est pas configuré. Ajoutez SUPABASE_URL et "
+            "SUPABASE_SERVICE_ROLE_KEY dans les Secrets."
+        )
+    ensure_storage_bucket()
+    original = Path(uploaded.name).name
+    safe = re.sub(r"[^A-Za-z0-9._-]", "_", original).strip("._") or "fichier"
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    storage_path = f"{subdir.strip('/') + '/' if subdir else ''}{stamp}_{safe}"
+    data = uploaded.getvalue()
+    options = {"content-type": uploaded.type or "application/octet-stream", "upsert": "false"}
+    client.storage.from_(SUPABASE_BUCKET).upload(storage_path, data, options)
+    return f"supabase://{SUPABASE_BUCKET}/{storage_path}"
+
+def storage_download_url(storage_ref, expires_in=3600):
+    """Génère une URL signée temporaire pour un fichier privé."""
+    if not storage_ref or not storage_ref.startswith("supabase://"):
+        return None
+    client = init_supabase_storage()
+    if client is None:
+        return None
+    try:
+        _, rest = storage_ref.split("supabase://", 1)
+        bucket, path = rest.split("/", 1)
+        result = client.storage.from_(bucket).create_signed_url(path, expires_in)
+        if isinstance(result, dict):
+            return result.get("signedURL") or result.get("signedUrl")
+        return getattr(result, "signed_url", None) or getattr(result, "signedURL", None)
+    except Exception:
+        return None
 
 # -----------------------------
 # AUTHENTIFICATION
@@ -97,211 +225,212 @@ if not st.session_state.get("authenticated", False):
 
 
 # -----------------------------
-# DATABASE
+# DATABASE POSTGRESQL
 # -----------------------------
-def conn():
-    c = sqlite3.connect(DB_PATH)
-    c.row_factory = sqlite3.Row
-    c.execute("PRAGMA foreign_keys = ON")
-    return c
+def _sql(sql):
+    # Le code historique utilisait des placeholders SQLite (?) ;
+    # PostgreSQL/psycopg2 utilise %s.
+    return sql.replace("?", "%s")
 
 def init_db():
-    c = conn()
-    c.executescript("""
-    CREATE TABLE IF NOT EXISTS people (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nom TEXT NOT NULL,
-        prenom TEXT,
-        fonction TEXT,
-        structure TEXT,
-        categorie TEXT,
-        telephone TEXT,
-        email TEXT,
-        localite TEXT,
-        region TEXT,
-        observations TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS activities (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        reference TEXT UNIQUE,
-        titre TEXT NOT NULL,
-        type_activite TEXT,
-        domaine TEXT,
-        date_activite TEXT,
-        heure_debut TEXT,
-        heure_fin TEXT,
-        lieu TEXT,
-        region TEXT,
-        localite TEXT,
-        responsable TEXT,
-        description TEXT,
-        objectifs TEXT,
-        resultats TEXT,
-        observations TEXT,
-        statut TEXT DEFAULT 'Prévue',
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS participants (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        activity_id INTEGER NOT NULL REFERENCES activities(id) ON DELETE CASCADE,
-        person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
-        present INTEGER DEFAULT 1,
-        observations TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS communications (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        activity_id INTEGER REFERENCES activities(id) ON DELETE SET NULL,
-        titre TEXT NOT NULL,
-        type_action TEXT,
-        plateforme TEXT,
-        date_publication TEXT,
-        lien TEXT,
-        vues INTEGER DEFAULT 0,
-        reactions INTEGER DEFAULT 0,
-        commentaires INTEGER DEFAULT 0,
-        partages INTEGER DEFAULT 0,
-        telechargements INTEGER DEFAULT 0,
-        observations TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS media (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        activity_id INTEGER REFERENCES activities(id) ON DELETE SET NULL,
-        media_name TEXT NOT NULL,
-        media_type TEXT,
-        journaliste TEXT,
-        personne_interviewee TEXT,
-        sujet TEXT,
-        date_intervention TEXT,
-        lieu TEXT,
-        type_intervention TEXT,
-        lien TEXT,
-        observations TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS audiovisual (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        activity_id INTEGER REFERENCES activities(id) ON DELETE SET NULL,
-        titre TEXT NOT NULL,
-        type_production TEXT,
-        date_production TEXT,
-        lieu TEXT,
-        theme TEXT,
-        interviewes TEXT,
-        duree TEXT,
-        responsable TEXT,
-        statut TEXT,
-        lien TEXT,
-        fichier_original TEXT,
-        observations TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS documents (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        titre TEXT NOT NULL,
-        auteurs TEXT,
-        annee INTEGER,
-        type_document TEXT,
-        thematique TEXT,
-        mots_cles TEXT,
-        chercheur_associe TEXT,
-        projet TEXT,
-        resume TEXT,
-        langue TEXT,
-        pages INTEGER,
-        reference TEXT,
-        fichier TEXT,
-        lien TEXT,
-        statut TEXT,
-        observations TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS library_visits (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
-        date_visite TEXT NOT NULL,
-        heure_arrivee TEXT,
-        heure_depart TEXT,
-        motif TEXT,
-        documents_consultes TEXT,
-        documents_empruntes TEXT,
-        observations TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS library_items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        inventaire TEXT UNIQUE,
-        cote TEXT,
-        isbn TEXT,
-        titre TEXT NOT NULL,
-        sous_titre TEXT,
-        auteurs TEXT,
-        editeur TEXT,
-        annee INTEGER,
-        type_document TEXT,
-        domaine TEXT,
-        thematique TEXT,
-        mots_cles TEXT,
-        exemplaires INTEGER DEFAULT 1,
-        disponibles INTEGER DEFAULT 1,
-        localisation TEXT,
-        etat TEXT,
-        format_document TEXT,
-        resume TEXT,
-        fichier TEXT,
-        lien TEXT,
-        observations TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS consultations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
-        item_id INTEGER REFERENCES library_items(id) ON DELETE SET NULL,
-        date_consultation TEXT NOT NULL,
-        heure TEXT,
-        type_consultation TEXT,
-        observations TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS loans (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
-        item_id INTEGER REFERENCES library_items(id) ON DELETE SET NULL,
-        date_emprunt TEXT NOT NULL,
-        date_retour_prevue TEXT NOT NULL,
-        date_retour_reelle TEXT,
-        statut TEXT DEFAULT 'En cours',
-        observations TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS researcher_valorization (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
-        date_action TEXT,
-        domaine TEXT,
-        thematique TEXT,
-        projet TEXT,
-        type_valorisation TEXT,
-        support TEXT,
-        lien TEXT,
-        observations TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS evidence (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        activity_id INTEGER REFERENCES activities(id) ON DELETE CASCADE,
-        nom_fichier TEXT NOT NULL,
-        chemin TEXT,
-        type_fichier TEXT,
-        date_ajout TEXT DEFAULT CURRENT_TIMESTAMP
-    );
-    """)
-    c.commit()
-    c.close()
+    conn = get_conn()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS people (
+            id BIGSERIAL PRIMARY KEY,
+            nom TEXT NOT NULL,
+            prenom TEXT,
+            fonction TEXT,
+            structure TEXT,
+            categorie TEXT,
+            telephone TEXT,
+            email TEXT,
+            localite TEXT,
+            region TEXT,
+            observations TEXT,
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS activities (
+            id BIGSERIAL PRIMARY KEY,
+            reference TEXT UNIQUE,
+            titre TEXT NOT NULL,
+            type_activite TEXT,
+            domaine TEXT,
+            date_activite DATE,
+            heure_debut TEXT,
+            heure_fin TEXT,
+            lieu TEXT,
+            region TEXT,
+            localite TEXT,
+            responsable TEXT,
+            description TEXT,
+            objectifs TEXT,
+            resultats TEXT,
+            observations TEXT,
+            statut TEXT DEFAULT 'Prévue',
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS participants (
+            id BIGSERIAL PRIMARY KEY,
+            activity_id BIGINT NOT NULL REFERENCES activities(id) ON DELETE CASCADE,
+            person_id BIGINT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+            present BOOLEAN DEFAULT TRUE,
+            observations TEXT
+        );
+        CREATE TABLE IF NOT EXISTS communications (
+            id BIGSERIAL PRIMARY KEY,
+            activity_id BIGINT REFERENCES activities(id) ON DELETE SET NULL,
+            titre TEXT NOT NULL,
+            type_action TEXT,
+            plateforme TEXT,
+            date_publication DATE,
+            lien TEXT,
+            vues BIGINT DEFAULT 0,
+            reactions BIGINT DEFAULT 0,
+            commentaires BIGINT DEFAULT 0,
+            partages BIGINT DEFAULT 0,
+            telechargements BIGINT DEFAULT 0,
+            observations TEXT
+        );
+        CREATE TABLE IF NOT EXISTS media (
+            id BIGSERIAL PRIMARY KEY,
+            activity_id BIGINT REFERENCES activities(id) ON DELETE SET NULL,
+            media_name TEXT NOT NULL,
+            media_type TEXT,
+            journaliste TEXT,
+            personne_interviewee TEXT,
+            sujet TEXT,
+            date_intervention DATE,
+            lieu TEXT,
+            type_intervention TEXT,
+            lien TEXT,
+            observations TEXT
+        );
+        CREATE TABLE IF NOT EXISTS audiovisual (
+            id BIGSERIAL PRIMARY KEY,
+            activity_id BIGINT REFERENCES activities(id) ON DELETE SET NULL,
+            titre TEXT NOT NULL,
+            type_production TEXT,
+            date_production DATE,
+            lieu TEXT,
+            theme TEXT,
+            interviewes TEXT,
+            duree TEXT,
+            responsable TEXT,
+            statut TEXT,
+            lien TEXT,
+            fichier_original TEXT,
+            observations TEXT
+        );
+        CREATE TABLE IF NOT EXISTS documents (
+            id BIGSERIAL PRIMARY KEY,
+            titre TEXT NOT NULL,
+            auteurs TEXT,
+            annee INTEGER,
+            type_document TEXT,
+            thematique TEXT,
+            mots_cles TEXT,
+            chercheur_associe TEXT,
+            projet TEXT,
+            resume TEXT,
+            langue TEXT,
+            pages INTEGER,
+            reference TEXT,
+            fichier TEXT,
+            lien TEXT,
+            statut TEXT,
+            observations TEXT
+        );
+        CREATE TABLE IF NOT EXISTS library_visits (
+            id BIGSERIAL PRIMARY KEY,
+            person_id BIGINT REFERENCES people(id) ON DELETE SET NULL,
+            date_visite DATE NOT NULL,
+            heure_arrivee TEXT,
+            heure_depart TEXT,
+            motif TEXT,
+            documents_consultes TEXT,
+            documents_empruntes TEXT,
+            observations TEXT
+        );
+        CREATE TABLE IF NOT EXISTS library_items (
+            id BIGSERIAL PRIMARY KEY,
+            inventaire TEXT UNIQUE,
+            cote TEXT,
+            isbn TEXT,
+            titre TEXT NOT NULL,
+            sous_titre TEXT,
+            auteurs TEXT,
+            editeur TEXT,
+            annee INTEGER,
+            type_document TEXT,
+            domaine TEXT,
+            thematique TEXT,
+            mots_cles TEXT,
+            exemplaires INTEGER DEFAULT 1,
+            disponibles INTEGER DEFAULT 1,
+            localisation TEXT,
+            etat TEXT,
+            format_document TEXT,
+            resume TEXT,
+            fichier TEXT,
+            lien TEXT,
+            observations TEXT
+        );
+        CREATE TABLE IF NOT EXISTS consultations (
+            id BIGSERIAL PRIMARY KEY,
+            person_id BIGINT REFERENCES people(id) ON DELETE SET NULL,
+            item_id BIGINT REFERENCES library_items(id) ON DELETE SET NULL,
+            date_consultation DATE NOT NULL,
+            heure TEXT,
+            type_consultation TEXT,
+            observations TEXT
+        );
+        CREATE TABLE IF NOT EXISTS loans (
+            id BIGSERIAL PRIMARY KEY,
+            person_id BIGINT REFERENCES people(id) ON DELETE SET NULL,
+            item_id BIGINT REFERENCES library_items(id) ON DELETE SET NULL,
+            date_emprunt DATE NOT NULL,
+            date_retour_prevue DATE NOT NULL,
+            date_retour_reelle DATE,
+            statut TEXT DEFAULT 'En cours',
+            observations TEXT
+        );
+        CREATE TABLE IF NOT EXISTS researcher_valorization (
+            id BIGSERIAL PRIMARY KEY,
+            person_id BIGINT REFERENCES people(id) ON DELETE SET NULL,
+            date_action DATE,
+            domaine TEXT,
+            thematique TEXT,
+            projet TEXT,
+            type_valorisation TEXT,
+            support TEXT,
+            lien TEXT,
+            observations TEXT
+        );
+        CREATE TABLE IF NOT EXISTS evidence (
+            id BIGSERIAL PRIMARY KEY,
+            activity_id BIGINT REFERENCES activities(id) ON DELETE CASCADE,
+            nom_fichier TEXT NOT NULL,
+            chemin TEXT,
+            type_fichier TEXT,
+            date_ajout TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS idx_activities_date ON activities(date_activite);
+        CREATE INDEX IF NOT EXISTS idx_documents_year ON documents(annee);
+        CREATE INDEX IF NOT EXISTS idx_loans_status ON loans(statut);
+        CREATE INDEX IF NOT EXISTS idx_visits_date ON library_visits(date_visite);
+        CREATE INDEX IF NOT EXISTS idx_storage_audiovisual ON audiovisual(fichier_original);
+        CREATE INDEX IF NOT EXISTS idx_storage_documents ON documents(fichier);
+        CREATE INDEX IF NOT EXISTS idx_storage_library ON library_items(fichier);
+        """)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        put_conn(conn)
 
 init_db()
 
@@ -309,16 +438,26 @@ init_db()
 # HELPERS
 # -----------------------------
 def q(sql, params=(), fetch=False):
-    c = conn()
-    cur = c.execute(sql, params)
-    if fetch:
-        rows = [dict(r) for r in cur.fetchall()]
-        c.close()
-        return rows
-    c.commit()
-    last = cur.lastrowid
-    c.close()
-    return last
+    conn = get_conn()
+    cur = conn.cursor()
+    try:
+        cur.execute(_sql(sql), params)
+        if fetch:
+            rows = cur.fetchall()
+            columns = [d[0] for d in cur.description] if cur.description else []
+            return [dict(zip(columns, row)) for row in rows]
+        last = None
+        if cur.description and cur.description[0][0] == "id":
+            row = cur.fetchone()
+            last = row[0] if row else None
+        conn.commit()
+        return last
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        cur.close()
+        put_conn(conn)
 
 def df(sql, params=()):
     return pd.DataFrame(q(sql, params, True))
@@ -338,13 +477,7 @@ def options_items():
 def save_uploaded(uploaded, subdir=""):
     if not uploaded:
         return ""
-    target = UPLOAD_DIR / subdir
-    target.mkdir(parents=True, exist_ok=True)
-    safe = "".join(ch for ch in uploaded.name if ch.isalnum() or ch in "._-").strip()
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = target / f"{stamp}_{safe}"
-    path.write_bytes(uploaded.getbuffer())
-    return str(path.relative_to(APP_DIR))
+    return upload_to_supabase(uploaded, subdir)
 
 def excel_bytes(dataframes):
     bio = io.BytesIO()
@@ -846,8 +979,11 @@ elif page == "📚 Bibliothèque":
             q("""INSERT INTO library_items(inventaire,cote,isbn,titre,sous_titre,auteurs,editeur,annee,type_document,domaine,thematique,mots_cles,exemplaires,disponibles,localisation,etat,format_document,resume,fichier,lien,observations)
                  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(inventaire,cote,isbn,titre,sous_titre,auteurs,editeur,annee,typ,domaine,theme,mots,exemplaires,disponibles,localisation,etat,format_doc,resume,path,lien,observations))
             st.success("Document ajouté à la bibliothèque."); st.rerun()
-        except sqlite3.IntegrityError:
-            st.error("Le numéro d'inventaire existe déjà.")
+        except Exception as exc:
+            if 'duplicate key' in str(exc).lower() or 'unique constraint' in str(exc).lower():
+                st.error("Le numéro d'inventaire existe déjà.")
+            else:
+                st.error(f"Erreur PostgreSQL / Storage : {exc}")
     st.subheader("Catalogue")
     library_catalog = df("SELECT id,inventaire,cote,titre,auteurs,annee,type_document,exemplaires,disponibles,localisation,etat FROM library_items ORDER BY titre")
     st.dataframe(library_catalog,use_container_width=True,hide_index=True)
