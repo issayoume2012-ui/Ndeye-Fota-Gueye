@@ -780,8 +780,12 @@ if page == "🏠 Tableau de bord":
 
     st.markdown("### 📈 Activités par mois")
     act = df("""
-        SELECT substr(date_activite,1,7) AS mois, COUNT(*) AS nombre
-        FROM activities GROUP BY mois ORDER BY mois
+        SELECT TO_CHAR(date_activite, 'YYYY-MM') AS mois,
+               COUNT(*) AS nombre
+        FROM activities
+        WHERE date_activite IS NOT NULL
+        GROUP BY TO_CHAR(date_activite, 'YYYY-MM')
+        ORDER BY mois
     """)
     if not act.empty:
         st.line_chart(act.set_index("mois"))
