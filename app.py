@@ -193,55 +193,64 @@ h2,h3 { color:#0b4f8a; }
 div[data-testid="stForm"] { background:white; padding:20px; border-radius:15px; border:1px solid #e6edf5; }
 </style>
 """, unsafe_allow_html=True)
-<style>
-/* ============================================================
-   MASQUAGE DE L'INTERFACE TECHNIQUE STREAMLIT / GITHUB
-   - masque le menu Streamlit
-   - masque le bouton Deploy / GitHub de l'en-tête
-   - masque la barre d'outils et le status technique
-   - masque le footer Streamlit
-   ============================================================ */
 
-/* Menu principal / footer */
+# ============================================================
+# MASQUAGE DE L'INTERFACE TECHNIQUE STREAMLIT / GITHUB
+# ============================================================
+# Ce bloc doit impérativement être envoyé à Streamlit avec
+# st.markdown(..., unsafe_allow_html=True).
+st.markdown("""
+<style>
+/* Menu principal et footer Streamlit */
 #MainMenu,
 footer {
-    visibility: hidden !important;
     display: none !important;
+    visibility: hidden !important;
 }
 
-/* Éléments techniques de l'en-tête */
+/* Barre d'outils, décoration, statut et bouton Deploy */
 div[data-testid="stToolbar"],
 div[data-testid="stDecoration"],
 div[data-testid="stStatusWidget"],
 div[data-testid="stAppDeployButton"],
+div[data-testid="stHeaderActionElements"],
+[data-testid="stToolbar"],
+[data-testid="stDecoration"],
+[data-testid="stStatusWidget"],
+[data-testid="stAppDeployButton"],
 [data-testid="stHeaderActionElements"] {
     display: none !important;
     visibility: hidden !important;
 }
 
-/* Liens/boutons GitHub et éléments d'action dans l'en-tête */
+/* Liens et boutons GitHub / Deploy dans l'en-tête */
 header[data-testid="stHeader"] a[href*="github.com"],
+header[data-testid="stHeader"] a[href*="streamlit.io"],
 header[data-testid="stHeader"] button[aria-label*="GitHub"],
 header[data-testid="stHeader"] button[title*="GitHub"],
+header[data-testid="stHeader"] button[aria-label*="Deploy"],
+header[data-testid="stHeader"] button[title*="Deploy"],
 header[data-testid="stHeader"] [data-testid*="GitHub"],
+header[data-testid="stHeader"] [data-testid*="github"],
 header[data-testid="stHeader"] [data-testid*="Deploy"],
 header[data-testid="stHeader"] [data-testid*="deploy"] {
     display: none !important;
     visibility: hidden !important;
 }
 
-/* Réduit l'espace réservé par certains éléments masqués */
+/* Réduit l'espace visuel de l'en-tête technique */
 header[data-testid="stHeader"] {
     min-height: 0 !important;
 }
 
-/* Cache les éléments techniques qui peuvent apparaître en bas */
-div[data-testid="stStatusWidget"],
+/* Éléments techniques susceptibles d'apparaître en bas */
 div[data-testid="stBottom"],
 div[data-testid="stBottomBlockContainer"] {
+    display: none !important;
     visibility: hidden !important;
 }
 </style>
+""", unsafe_allow_html=True)
 
 
 # -----------------------------
