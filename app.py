@@ -193,6 +193,55 @@ h2,h3 { color:#0b4f8a; }
 div[data-testid="stForm"] { background:white; padding:20px; border-radius:15px; border:1px solid #e6edf5; }
 </style>
 """, unsafe_allow_html=True)
+<style>
+/* ============================================================
+   MASQUAGE DE L'INTERFACE TECHNIQUE STREAMLIT / GITHUB
+   - masque le menu Streamlit
+   - masque le bouton Deploy / GitHub de l'en-tête
+   - masque la barre d'outils et le status technique
+   - masque le footer Streamlit
+   ============================================================ */
+
+/* Menu principal / footer */
+#MainMenu,
+footer {
+    visibility: hidden !important;
+    display: none !important;
+}
+
+/* Éléments techniques de l'en-tête */
+div[data-testid="stToolbar"],
+div[data-testid="stDecoration"],
+div[data-testid="stStatusWidget"],
+div[data-testid="stAppDeployButton"],
+[data-testid="stHeaderActionElements"] {
+    display: none !important;
+    visibility: hidden !important;
+}
+
+/* Liens/boutons GitHub et éléments d'action dans l'en-tête */
+header[data-testid="stHeader"] a[href*="github.com"],
+header[data-testid="stHeader"] button[aria-label*="GitHub"],
+header[data-testid="stHeader"] button[title*="GitHub"],
+header[data-testid="stHeader"] [data-testid*="GitHub"],
+header[data-testid="stHeader"] [data-testid*="Deploy"],
+header[data-testid="stHeader"] [data-testid*="deploy"] {
+    display: none !important;
+    visibility: hidden !important;
+}
+
+/* Réduit l'espace réservé par certains éléments masqués */
+header[data-testid="stHeader"] {
+    min-height: 0 !important;
+}
+
+/* Cache les éléments techniques qui peuvent apparaître en bas */
+div[data-testid="stStatusWidget"],
+div[data-testid="stBottom"],
+div[data-testid="stBottomBlockContainer"] {
+    visibility: hidden !important;
+}
+</style>
 
 
 # -----------------------------
@@ -722,11 +771,8 @@ if page == "🏠 Tableau de bord":
 
     st.markdown("### 📈 Activités par mois")
     act = df("""
-        SELECT TO_CHAR(date_activite, 'YYYY-MM') AS mois, COUNT(*) AS nombre
-        FROM activities
-        WHERE date_activite IS NOT NULL
-        GROUP BY TO_CHAR(date_activite, 'YYYY-MM')
-        ORDER BY mois
+        SELECT substr(date_activite,1,7) AS mois, COUNT(*) AS nombre
+        FROM activities GROUP BY mois ORDER BY mois
     """)
     if not act.empty:
         st.line_chart(act.set_index("mois"))
