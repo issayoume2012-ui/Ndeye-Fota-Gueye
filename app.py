@@ -1413,7 +1413,7 @@ elif page == "📚 Documentations":
     render_documentations()
 elif page == "🔬 Résultat scientifique":
     render_scientific_results()
-elif page == "👤 Visiteurs":
+elif page == "👥 Visiteurs":
     render_visitors()
 elif page == "🧬 Valorisation chercheurs":
     render_researchers()
