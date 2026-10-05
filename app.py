@@ -980,7 +980,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     Architecture du document :
       01. Synthèse exécutive
       02. Communication
-          2.1 Activités
+          2.1 Activités — centre de Communication
           2.2 Actions de communication
           2.3 Presse & médias
           2.4 Audiovisuel
@@ -1199,7 +1199,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     # Tableau de synthèse des espaces
     synthesis_rows = [
         ["Espace", "Contenu", "Enregistrements"],
-        ["Communication", "Activités, actions, médias, audiovisuel, formats",
+        ["Communication", "Activités (centre), actions, médias, audiovisuel, formats",
          str(sum(len(report_data.get(k, pd.DataFrame())) for k in [
              "Activités", "Communication", "Médias", "Audiovisuel", "Formats"
          ]))],
@@ -1227,12 +1227,12 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     # ------------------------------------------------------------
     story.extend(_pdf_section_header(
         "02", "COMMUNICATION",
-        "Activités, actions de diffusion, presse, médias, audiovisuel et formats.",
+        "Activités au centre, actions de diffusion, presse, médias, audiovisuel et formats.",
         section
     ))
 
     communication_sections = [
-        ("2.1", "Activités", "Activités et événements enregistrés.",
+        ("2.1", "Activités — centre de Communication", "Activités déjà enregistrées dans la plateforme et intégrées au rapport Communication.",
          report_data.get("Activités")),
         ("2.2", "Actions de communication", "Actions de diffusion et publication.",
          report_data.get("Communication")),
@@ -1650,12 +1650,21 @@ def _communication_audiovisual_formats():
 
 def render_communication():
     st.header("📣 Communication")
-    st.caption("Espace XXL de pilotage des activités, de la communication, des médias et de la production audiovisuelle.")
-    st.markdown('<div class="section-banner"><span>ACTIVITÉS & COMMUNICATION</span><strong>Un seul espace, une organisation sans doublons</strong></div>', unsafe_allow_html=True)
-    st.subheader("🗓️ Activités")
+    st.caption("Centre principal de communication : les activités constituent le cœur de cet espace et alimentent les actions, médias et productions.")
+    st.markdown(
+        '<div class="section-banner"><span>ACTIVITÉS • COMMUNICATION</span>'
+        '<strong>Les activités sont le centre de pilotage de cet onglet</strong></div>',
+        unsafe_allow_html=True,
+    )
+
+    # L'activité est volontairement intégrée au centre Communication.
+    # Il n'existe plus de rubrique/navigation autonome « Activités ».
+    st.markdown("## 🗓️ Activités — centre de Communication")
+    st.caption("Toutes les activités enregistrées sont gérées ici. Elles peuvent ensuite être liées aux actions de communication.")
     render_activities()
-    st.markdown("### 📚 Sous-espaces de l’activité")
-    t1,t2,t3=st.tabs(["📣 Communication","📰 Médias","🎥 Audiovisuel & formats"])
+
+    st.markdown("## 📚 Compléments de communication")
+    t1,t2,t3=st.tabs(["📣 Actions de communication","📰 Médias","🎥 Audiovisuel & formats"])
     with t1: _communication_actions()
     with t2: _communication_media()
     with t3: _communication_audiovisual_formats()
@@ -1992,11 +2001,13 @@ def render_reports():
     # ============================================================
     # DONNÉES DE LA NOUVELLE STRUCTURE
     # ============================================================
+    # IMPORTANT : les activités sont le centre de l'onglet Communication.
+    # Le rapport doit reprendre les activités déjà renseignées dans la plateforme,
+    # même lorsqu'elles ne tombent pas dans la période sélectionnée. Cela évite de
+    # produire un rapport « Activités » vide alors que des activités existent déjà.
     activities = df(
         "SELECT * FROM activities "
-        "WHERE date_activite BETWEEN ? AND ? "
-        "ORDER BY date_activite, id",
-        (str(start), str(end)),
+        "ORDER BY date_activite, id"
     )
 
     communications = df(
@@ -2222,7 +2233,8 @@ def render_reports():
     # ============================================================
     st.markdown("### 👁️ Aperçu du rapport")
 
-    with st.expander("📣 02 — Communication", expanded=True):
+    with st.expander("📣 02 — Communication — Activités au centre", expanded=True):
+        st.markdown("**🗓️ Activités enregistrées — centre de Communication**")
         st.dataframe(
             activities,
             use_container_width=True,
