@@ -705,161 +705,699 @@ def csv_bytes(data):
 
 
 def _pdf_header_footer(canvas, doc):
-    """Habillage A4 premium : en-tête, ligne graphique, pied de page."""
+    """Habillage A4 premium cohérent avec la nouvelle architecture de l'application."""
     canvas.saveState()
     w, h = A4
-    navy = colors.HexColor("#083B66")
+
+    navy = colors.HexColor("#062A49")
     blue = colors.HexColor("#0B74B8")
     green = colors.HexColor("#2D8A4A")
-    light = colors.HexColor("#EAF4FA")
-    # Bandeau haut
+    pale = colors.HexColor("#EEF6FB")
+    grey = colors.HexColor("#64748B")
+    line = colors.HexColor("#D7E5EF")
+
+    # Bandeau supérieur
     canvas.setFillColor(navy)
-    canvas.rect(0, h-58, w, 58, fill=1, stroke=0)
+    canvas.rect(0, h - 64, w, 64, fill=1, stroke=0)
+    canvas.setFillColor(blue)
+    canvas.rect(0, h - 68, w, 4, fill=1, stroke=0)
     canvas.setFillColor(green)
-    canvas.rect(0, h-63, w, 5, fill=1, stroke=0)
+    canvas.rect(0, h - 71, w, 3, fill=1, stroke=0)
+
     canvas.setFillColor(colors.white)
     canvas.setFont("Helvetica-Bold", 10)
-    canvas.drawString(34, h-32, "ISRA • CRA")
-    canvas.setFont("Helvetica", 7.5)
-    canvas.drawRightString(w-34, h-32, "COMMUNICATION • DOCUMENTATION • IST • BIBLIOTHÈQUE")
-    # Pied
-    canvas.setStrokeColor(colors.HexColor("#D7E5EF"))
-    canvas.line(34, 31, w-34, 31)
-    canvas.setFillColor(colors.HexColor("#64748B"))
+    canvas.drawString(34, h - 31, "ISRA • CRA")
+    canvas.setFont("Helvetica", 7.2)
+    canvas.drawRightString(
+        w - 34,
+        h - 31,
+        "IST • COMMUNICATION • DOCUMENTATION • RÉSULTAT SCIENTIFIQUE"
+    )
+
+    # Ligne de pied
+    canvas.setStrokeColor(line)
+    canvas.line(34, 31, w - 34, 31)
+    canvas.setFillColor(grey)
     canvas.setFont("Helvetica", 7)
     canvas.drawString(34, 19, "Registre interne CRA/ISRA • Ndeye Fota Gueye")
-    canvas.drawRightString(w-34, 19, f"Page {doc.page}")
+    canvas.drawRightString(w - 34, 19, f"Page {doc.page}")
+
     canvas.restoreState()
 
 
 def _safe_para(value, style):
-    value = "" if value is None else str(value)
-    value = value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    value = value.replace("\n", "<br/>")
+    """Transforme toute valeur en Paragraph ReportLab sans casser les caractères spéciaux."""
+    if value is None:
+        value = ""
+    value = str(value)
+    value = (
+        value.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\n", "<br/>")
+    )
     return Paragraph(value, style)
 
 
-def _df_table(data, body_style, head_style):
-    """Tableau A4 lisible, sans supprimer les colonnes ni les données."""
-    d = data.copy().fillna("")
+def _pdf_table(data, body_style, head_style, usable_width=523, max_rows=250):
+    """
+    Tableau PDF robuste :
+    - conserve les données ;
+    - répartit intelligemment la largeur ;
+    - évite qu'une table très large sorte de la page ;
+    - répète l'en-tête sur les pages suivantes.
+    """
+    if data is None:
+        data = pd.DataFrame()
+
+    d = data.copy()
+    if d.empty:
+        return None
+
+    d = d.fillna("")
     headers = [str(c) for c in d.columns]
+
     table_data = [[_safe_para(c, head_style) for c in headers]]
-    for row in d.astype(str).values.tolist():
+
+    limited = d.head(max_rows)
+    for row in limited.astype(str).values.tolist():
         table_data.append([_safe_para(v, body_style) for v in row])
-    # A4 portrait : largeur utile 523 pt, colonnes pondérées par le contenu
-    usable = 523
+
+    # Poids des colonnes.
+    # Les tables très larges restent lisibles grâce à une largeur minimale
+    # et à un poids proportionnel au contenu.
     weights = []
-    for col in d.columns:
-        max_len = max([len(str(col))] + [len(str(x)) for x in d[col].head(120)])
-        weights.append(min(max(max_len * 3.0, 42), 145))
+    for col in limited.columns:
+        values = [str(col)] + [str(x) for x in limited[col].head(80).tolist()]
+        max_len = max([len(x) for x in values] or [1])
+        weights.append(min(max(max_len * 2.4, 28), 105))
+
     total = sum(weights) or 1
-    widths = [usable * x / total for x in weights]
-    tbl = Table(table_data, colWidths=widths, repeatRows=1, hAlign="LEFT")
+    widths = [usable_width * weight / total for weight in weights]
+
+    tbl = Table(
+        table_data,
+        colWidths=widths,
+        repeatRows=1,
+        hAlign="LEFT",
+        splitByRow=1,
+    )
     tbl.setStyle(TableStyle([
-        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#083B66")),
-        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
-        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
-        ("FONTSIZE", (0,0), (-1,0), 7),
-        ("FONTSIZE", (0,1), (-1,-1), 6.1),
-        ("GRID", (0,0), (-1,-1), .25, colors.HexColor("#C7D8E5")),
-        ("VALIGN", (0,0), (-1,-1), "TOP"),
-        ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.white, colors.HexColor("#F5F9FC")]),
-        ("LEFTPADDING", (0,0), (-1,-1), 4),
-        ("RIGHTPADDING", (0,0), (-1,-1), 4),
-        ("TOPPADDING", (0,0), (-1,-1), 4),
-        ("BOTTOMPADDING", (0,0), (-1,-1), 4),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#062A49")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, 0), 6.6),
+        ("FONTSIZE", (0, 1), (-1, -1), 5.9),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#C7D8E5")),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [
+            colors.white,
+            colors.HexColor("#F6FAFD")
+        ]),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    return tbl
+
+
+def _df_table(data, body_style, head_style):
+    """Compatibilité avec les exports PDF individuels existants."""
+    return _pdf_table(data, body_style, head_style)
+
+
+def _pdf_section_header(number, title, subtitle, style):
+    """Bloc visuel de section pour le rapport premium."""
+    content = [
+        Paragraph(
+            f'<font color="#2D8A4A"><b>{number}</b></font> &nbsp; '
+            f'<b>{title}</b>',
+            style
+        )
+    ]
+    if subtitle:
+        content.append(
+            Paragraph(
+                str(subtitle).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"),
+                ParagraphStyle(
+                    f"SectionSub_{number}",
+                    parent=style,
+                    fontSize=7.5,
+                    leading=10,
+                    textColor=colors.HexColor("#64748B"),
+                    spaceBefore=1,
+                    spaceAfter=6,
+                )
+            )
+        )
+    return content
+
+
+def _pdf_kpi_table(kpis, body_style):
+    """KPI compact et premium pour la synthèse du rapport."""
+    if not kpis:
+        return None
+
+    cells = []
+    for label, value in kpis:
+        cells.append(
+            Paragraph(
+                f'<font size="7" color="#64748B">{str(label)}</font><br/>'
+                f'<font size="17" color="#083B66"><b>{str(value)}</b></font>',
+                body_style
+            )
+        )
+
+    cols = min(4, len(cells))
+    rows = []
+    for i in range(0, len(cells), cols):
+        row = cells[i:i + cols]
+        while len(row) < cols:
+            row.append(Paragraph("", body_style))
+        rows.append(row)
+
+    widths = [523 / cols] * cols
+    tbl = Table(rows, colWidths=widths, hAlign="LEFT")
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F4F9FC")),
+        ("BOX", (0, 0), (-1, -1), 0.6, colors.HexColor("#D7E5EF")),
+        ("INNERGRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#D7E5EF")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 9),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 9),
+        ("TOPPADDING", (0, 0), (-1, -1), 9),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 9),
     ]))
     return tbl
 
 
 def pdf_bytes(data, title="Rapport CRA/ISRA"):
-    """PDF A4 portrait premium pour un registre donné."""
+    """PDF individuel premium conservant les exports existants."""
     if not REPORTLAB_AVAILABLE:
         return None
+
     bio = io.BytesIO()
     doc = SimpleDocTemplate(
-        bio, pagesize=A4, rightMargin=34, leftMargin=34, topMargin=78, bottomMargin=42
+        bio,
+        pagesize=A4,
+        rightMargin=34,
+        leftMargin=34,
+        topMargin=82,
+        bottomMargin=42,
+        title=title,
+        author="CRA/ISRA",
     )
+
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
-        "BrandTitle", parent=styles["Title"], alignment=TA_LEFT,
-        fontSize=20, leading=24, textColor=colors.HexColor("#083B66"),
-        spaceAfter=7
+        "BrandTitle",
+        parent=styles["Title"],
+        alignment=TA_LEFT,
+        fontSize=20,
+        leading=24,
+        textColor=colors.HexColor("#083B66"),
+        spaceAfter=7,
     )
     subtitle = ParagraphStyle(
-        "Subtitle", parent=styles["BodyText"], fontSize=8.5, leading=12,
-        textColor=colors.HexColor("#64748B"), spaceAfter=12
+        "Subtitle",
+        parent=styles["BodyText"],
+        fontSize=8.5,
+        leading=12,
+        textColor=colors.HexColor("#64748B"),
+        spaceAfter=12,
     )
-    body = ParagraphStyle("PDFBody", parent=styles["BodyText"], fontSize=8, leading=10)
-    head = ParagraphStyle("PDFHead", parent=body, textColor=colors.white,
-                          fontName="Helvetica-Bold", fontSize=7, leading=8)
+    body = ParagraphStyle(
+        "PDFBody",
+        parent=styles["BodyText"],
+        fontSize=8,
+        leading=10,
+        textColor=colors.HexColor("#1E293B"),
+    )
+    head = ParagraphStyle(
+        "PDFHead",
+        parent=body,
+        textColor=colors.white,
+        fontName="Helvetica-Bold",
+        fontSize=6.6,
+        leading=7.5,
+    )
     section = ParagraphStyle(
-        "Section", parent=styles["Heading2"], fontSize=12, leading=15,
-        textColor=colors.HexColor("#0B74B8"), spaceBefore=8, spaceAfter=7
+        "Section",
+        parent=styles["Heading2"],
+        fontSize=12,
+        leading=15,
+        textColor=colors.HexColor("#0B74B8"),
+        spaceBefore=8,
+        spaceAfter=7,
     )
+
     story = [
         Paragraph("RAPPORT • CRA / ISRA", title_style),
         Paragraph(title, section),
         Paragraph(
-            f"Profil : <b>Ndeye Fota Gueye</b> — Chargée de la communication et documentation de CRA/ISRA Saint-Louis"
+            f"<b>Ndeye Fota Gueye</b> — Chargée de la communication et documentation de CRA/ISRA Saint-Louis"
             f"<br/>Généré le {datetime.now().strftime('%d/%m/%Y à %H:%M')}",
-            subtitle
+            subtitle,
         ),
     ]
+
     if data is None or data.empty:
         story.append(Paragraph("Aucune donnée à afficher.", body))
     else:
-        story.append(_df_table(data, body, head))
+        table = _pdf_table(data, body, head)
+        if table is not None:
+            story.append(table)
+
     doc.build(story, onFirstPage=_pdf_header_footer, onLaterPages=_pdf_header_footer)
     return bio.getvalue()
 
 
-def complete_report_pdf(report_data, start=None, end=None):
-    """Rapport global A4 : profil + indicateurs + toutes les tables renseignées dans le site."""
+def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
+    """
+    RAPPORT PREMIUM — nouvelle structure de l'application.
+
+    Architecture du document :
+      01. Synthèse exécutive
+      02. Communication
+          2.1 Activités
+          2.2 Actions de communication
+          2.3 Presse & médias
+          2.4 Audiovisuel
+          2.5 Formats de communication
+      03. Documentations
+          3.1 Documentation IST
+          3.2 Bibliothèque
+          3.3 Consultations
+          3.4 Prêts & retours
+      04. Résultat scientifique
+          4.1 Résultats scientifiques
+          4.2 Publications scientifiques
+      05. Visiteurs
+      06. Valorisation chercheurs
+          6.1 Profils chercheurs
+          6.2 Actions de valorisation
+      07. Profil / identité du responsable
+
+    Cette hiérarchie correspond directement aux espaces de navigation
+    de l'application et ne reprend plus l'ancien classement technique.
+    """
     if not REPORTLAB_AVAILABLE:
         return None
+
+    report_profile = report_profile or {}
+
     bio = io.BytesIO()
     doc = SimpleDocTemplate(
-        bio, pagesize=A4, rightMargin=34, leftMargin=34, topMargin=78, bottomMargin=42
+        bio,
+        pagesize=A4,
+        rightMargin=34,
+        leftMargin=34,
+        topMargin=82,
+        bottomMargin=45,
+        title="Rapport premium IST et Communication — CRA/ISRA",
+        author="CRA/ISRA",
+        subject="Rapport structuré Communication • Documentations • Résultat scientifique",
     )
-    styles = getSampleStyleSheet()
-    title = ParagraphStyle("CRATitle", parent=styles["Title"], fontSize=22, leading=26,
-                           textColor=colors.HexColor("#083B66"), spaceAfter=8)
-    sub = ParagraphStyle("CRASub", parent=styles["BodyText"], fontSize=9, leading=13,
-                         textColor=colors.HexColor("#475569"), spaceAfter=10)
-    sec = ParagraphStyle("CRASection", parent=styles["Heading2"], fontSize=13, leading=16,
-                         textColor=colors.HexColor("#0B74B8"), spaceBefore=10, spaceAfter=8)
-    body = ParagraphStyle("CRABody", parent=styles["BodyText"], fontSize=8, leading=10)
-    head = ParagraphStyle("CRAHead", parent=body, textColor=colors.white,
-                          fontName="Helvetica-Bold", fontSize=7, leading=8)
 
-    story = [
-        Paragraph("DOSSIER COMPLET", title),
-        Paragraph("Registre Communication • Documentation • IST • Bibliothèque", sec),
+    styles = getSampleStyleSheet()
+
+    cover_title = ParagraphStyle(
+        "PremiumCoverTitle",
+        parent=styles["Title"],
+        fontSize=25,
+        leading=29,
+        textColor=colors.HexColor("#062A49"),
+        spaceAfter=10,
+    )
+    cover_sub = ParagraphStyle(
+        "PremiumCoverSub",
+        parent=styles["BodyText"],
+        fontSize=10,
+        leading=15,
+        textColor=colors.HexColor("#475569"),
+        spaceAfter=12,
+    )
+    section = ParagraphStyle(
+        "PremiumSection",
+        parent=styles["Heading2"],
+        fontSize=15,
+        leading=19,
+        textColor=colors.HexColor("#083B66"),
+        spaceBefore=8,
+        spaceAfter=8,
+    )
+    subsection = ParagraphStyle(
+        "PremiumSubsection",
+        parent=styles["Heading3"],
+        fontSize=10.5,
+        leading=13,
+        textColor=colors.HexColor("#0B74B8"),
+        spaceBefore=8,
+        spaceAfter=5,
+    )
+    body = ParagraphStyle(
+        "PremiumBody",
+        parent=styles["BodyText"],
+        fontSize=8,
+        leading=10.5,
+        textColor=colors.HexColor("#1E293B"),
+        spaceAfter=4,
+    )
+    small = ParagraphStyle(
+        "PremiumSmall",
+        parent=body,
+        fontSize=7.2,
+        leading=9.5,
+        textColor=colors.HexColor("#64748B"),
+    )
+    head = ParagraphStyle(
+        "PremiumHead",
+        parent=body,
+        textColor=colors.white,
+        fontName="Helvetica-Bold",
+        fontSize=6.5,
+        leading=7.5,
+    )
+    cover_badge = ParagraphStyle(
+        "PremiumBadge",
+        parent=body,
+        fontSize=8,
+        leading=10,
+        textColor=colors.HexColor("#2D8A4A"),
+        spaceAfter=10,
+    )
+
+    story = []
+
+    # ------------------------------------------------------------
+    # COUVERTURE
+    # ------------------------------------------------------------
+    story.append(Spacer(1, 40))
+    story.append(Paragraph("ISRA • CRA", cover_badge))
+    story.append(Paragraph("RAPPORT PREMIUM", cover_title))
+    story.append(
         Paragraph(
-            "<b>Ndeye Fota Gueye</b><br/>"
-            "Chargée de la communication et documentation de CRA/ISRA Saint-Louis<br/>"
-            f"Période : {start or '—'} → {end or '—'} • Généré le {datetime.now().strftime('%d/%m/%Y à %H:%M')}",
-            sub
-        ),
+            "IST et Communication",
+            ParagraphStyle(
+                "CoverBlue",
+                parent=cover_title,
+                fontSize=19,
+                leading=23,
+                textColor=colors.HexColor("#0B74B8"),
+                spaceAfter=12,
+            ),
+        )
+    )
+    story.append(
+        Paragraph(
+            "Communication • Documentations • Résultat scientifique",
+            cover_sub,
+        )
+    )
+    story.append(
+        Table(
+            [[
+                Paragraph(
+                    "<b>Responsable</b><br/>"
+                    f"{report_profile.get('nom', 'Ndeye Fota Gueye')}<br/>"
+                    f"{report_profile.get('fonction', 'Chargée de la communication et documentation de CRA/ISRA Saint-Louis')}",
+                    body,
+                ),
+                Paragraph(
+                    "<b>Période du rapport</b><br/>"
+                    f"{start or '—'} → {end or '—'}<br/>"
+                    f"Généré le {datetime.now().strftime('%d/%m/%Y à %H:%M')}",
+                    body,
+                ),
+            ]],
+            colWidths=[260, 263],
+            hAlign="LEFT",
+            style=TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F3F8FC")),
+                ("BOX", (0, 0), (-1, -1), 0.7, colors.HexColor("#D7E5EF")),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 12),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 12),
+                ("TOPPADDING", (0, 0), (-1, -1), 12),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+            ]),
+        )
+    )
+    story.append(Spacer(1, 18))
+    story.append(
+        Paragraph(
+            "Document de pilotage et de capitalisation généré à partir des données "
+            "enregistrées dans la plateforme CRA/ISRA.",
+            small,
+        )
+    )
+    story.append(PageBreak())
+
+    # ------------------------------------------------------------
+    # 01 — SYNTHÈSE EXÉCUTIVE
+    # ------------------------------------------------------------
+    story.extend(_pdf_section_header(
+        "01", "SYNTHÈSE EXÉCUTIVE",
+        "Vue d'ensemble alignée sur la nouvelle organisation de l'application.",
+        section
+    ))
+
+    kpi_order = [
+        ("Activités", report_data.get("Activités")),
+        ("Actions de communication", report_data.get("Communication")),
+        ("Presse & médias", report_data.get("Médias")),
+        ("Audiovisuel", report_data.get("Audiovisuel")),
+        ("Documents IST", report_data.get("Documents IST")),
+        ("Bibliothèque", report_data.get("Bibliothèque")),
+        ("Résultats scientifiques", report_data.get("Résultats scientifiques")),
+        ("Publications scientifiques", report_data.get("Publications scientifiques")),
+        ("Visiteurs", report_data.get("Visiteurs")),
+        ("Valorisation chercheurs", report_data.get("Valorisation chercheurs")),
     ]
 
-    # Synthèse calculée à partir des mêmes données que l'application
-    story.append(Paragraph("01 — SYNTHÈSE", sec))
-    metrics = []
-    for label, frame in report_data.items():
-        metrics.append([label, str(len(frame))])
-    story.append(_df_table(pd.DataFrame(metrics, columns=["Registre", "Nombre d'enregistrements"]), body, head))
+    kpis = []
+    for label, frame in kpi_order:
+        if frame is not None:
+            kpis.append((label, len(frame)))
 
-    for idx, (name, frame) in enumerate(report_data.items(), start=2):
-        story.append(PageBreak())
-        story.append(Paragraph(f"{idx:02d} — {name.upper()}", sec))
+    kpi_table = _pdf_kpi_table(kpis, body)
+    if kpi_table is not None:
+        story.append(kpi_table)
+        story.append(Spacer(1, 12))
+
+    story.append(
+        Paragraph(
+            "Le présent rapport reprend volontairement la même logique que la navigation "
+            "actuelle : les informations sont regroupées par espace métier et non plus "
+            "comme une succession de tables techniques. Les catalogues et profils sans "
+            "date propre sont présentés comme un état de la base à la date de génération.",
+            body,
+        )
+    )
+
+    # Tableau de synthèse des espaces
+    synthesis_rows = [
+        ["Espace", "Contenu", "Enregistrements"],
+        ["Communication", "Activités, actions, médias, audiovisuel, formats",
+         str(sum(len(report_data.get(k, pd.DataFrame())) for k in [
+             "Activités", "Communication", "Médias", "Audiovisuel", "Formats"
+         ]))],
+        ["Documentations", "Documentation IST, bibliothèque, consultations, prêts",
+         str(sum(len(report_data.get(k, pd.DataFrame())) for k in [
+             "Documents IST", "Bibliothèque", "Consultations", "Prêts"
+         ]))],
+        ["Résultat scientifique", "Résultats scientifiques et publications",
+         str(sum(len(report_data.get(k, pd.DataFrame())) for k in [
+             "Résultats scientifiques", "Publications scientifiques"
+         ]))],
+        ["Visiteurs", "Registre des visiteurs",
+         str(len(report_data.get("Visiteurs", pd.DataFrame())))],
+        ["Valorisation chercheurs", "Profils et actions de valorisation",
+         str(sum(len(report_data.get(k, pd.DataFrame())) for k in [
+             "Profils chercheurs", "Valorisation chercheurs"
+         ]))],
+    ]
+    synth_df = pd.DataFrame(synthesis_rows[1:], columns=synthesis_rows[0])
+    story.append(_pdf_table(synth_df, body, head))
+    story.append(PageBreak())
+
+    # ------------------------------------------------------------
+    # 02 — COMMUNICATION
+    # ------------------------------------------------------------
+    story.extend(_pdf_section_header(
+        "02", "COMMUNICATION",
+        "Activités, actions de diffusion, presse, médias, audiovisuel et formats.",
+        section
+    ))
+
+    communication_sections = [
+        ("2.1", "Activités", "Activités et événements enregistrés.",
+         report_data.get("Activités")),
+        ("2.2", "Actions de communication", "Actions de diffusion et publication.",
+         report_data.get("Communication")),
+        ("2.3", "Presse & médias", "Interventions médias et couverture.",
+         report_data.get("Médias")),
+        ("2.4", "Audiovisuel", "Productions audiovisuelles enregistrées.",
+         report_data.get("Audiovisuel")),
+        ("2.5", "Formats de communication", "Référentiel des formats et usages.",
+         report_data.get("Formats")),
+    ]
+
+    for num, title, desc, frame in communication_sections:
+        story.append(Paragraph(f"{num} — {title}", subsection))
+        story.append(Paragraph(desc, small))
         if frame is None or frame.empty:
             story.append(Paragraph("Aucune donnée renseignée pour cette rubrique.", body))
         else:
-            story.append(_df_table(frame, body, head))
+            story.append(_pdf_table(frame, body, head))
+        story.append(Spacer(1, 6))
 
-    doc.build(story, onFirstPage=_pdf_header_footer, onLaterPages=_pdf_header_footer)
+    story.append(PageBreak())
+
+    # ------------------------------------------------------------
+    # 03 — DOCUMENTATIONS
+    # ------------------------------------------------------------
+    story.extend(_pdf_section_header(
+        "03", "DOCUMENTATIONS",
+        "Documentation IST, bibliothèque, consultations et prêts/retours.",
+        section
+    ))
+
+    documentation_sections = [
+        ("3.1", "Documentation IST", "Ressources documentaires et fonds IST.",
+         report_data.get("Documents IST")),
+        ("3.2", "Bibliothèque", "État du catalogue et des disponibilités.",
+         report_data.get("Bibliothèque")),
+        ("3.3", "Consultations", "Historique des consultations.",
+         report_data.get("Consultations")),
+        ("3.4", "Prêts & retours", "Suivi des emprunts et retours.",
+         report_data.get("Prêts")),
+        ("3.5", "Personnes", "Personnes enregistrées comme acteurs documentaires.",
+         report_data.get("Personnes")),
+    ]
+
+    for num, title, desc, frame in documentation_sections:
+        story.append(Paragraph(f"{num} — {title}", subsection))
+        story.append(Paragraph(desc, small))
+        if frame is None or frame.empty:
+            story.append(Paragraph("Aucune donnée renseignée pour cette rubrique.", body))
+        else:
+            story.append(_pdf_table(frame, body, head))
+        story.append(Spacer(1, 6))
+
+    story.append(PageBreak())
+
+    # ------------------------------------------------------------
+    # 04 — RÉSULTAT SCIENTIFIQUE
+    # ------------------------------------------------------------
+    story.extend(_pdf_section_header(
+        "04", "RÉSULTAT SCIENTIFIQUE",
+        "Capitalisation des résultats, fiches, mémoires, thèses, rapports et publications.",
+        section
+    ))
+
+    scientific_sections = [
+        ("4.1", "Résultats scientifiques",
+         "Fiches techniques, mémoires, thèses, rapports et autres résultats.",
+         report_data.get("Résultats scientifiques")),
+        ("4.2", "Publications scientifiques",
+         "Notes politiques et notes de synthèse.",
+         report_data.get("Publications scientifiques")),
+    ]
+
+    for num, title, desc, frame in scientific_sections:
+        story.append(Paragraph(f"{num} — {title}", subsection))
+        story.append(Paragraph(desc, small))
+        if frame is None or frame.empty:
+            story.append(Paragraph("Aucune donnée renseignée pour cette rubrique.", body))
+        else:
+            story.append(_pdf_table(frame, body, head))
+        story.append(Spacer(1, 6))
+
+    story.append(PageBreak())
+
+    # ------------------------------------------------------------
+    # 05 — VISITEURS
+    # ------------------------------------------------------------
+    story.extend(_pdf_section_header(
+        "05", "VISITEURS",
+        "Registre des visites et informations associées.",
+        section
+    ))
+
+    visitors = report_data.get("Visiteurs")
+    if visitors is None or visitors.empty:
+        story.append(Paragraph("Aucune visite renseignée pour cette période.", body))
+    else:
+        story.append(_pdf_table(visitors, body, head))
+
+    story.append(PageBreak())
+
+    # ------------------------------------------------------------
+    # 06 — VALORISATION CHERCHEURS
+    # ------------------------------------------------------------
+    story.extend(_pdf_section_header(
+        "06", "VALORISATION CHERCHEURS",
+        "Profils des chercheurs et actions de valorisation associées.",
+        section
+    ))
+
+    for num, title, desc, key in [
+        ("6.1", "Profils chercheurs", "Référentiel des chercheurs.", "Profils chercheurs"),
+        ("6.2", "Actions de valorisation", "Productions et actions associées aux chercheurs.",
+         "Valorisation chercheurs"),
+    ]:
+        story.append(Paragraph(f"{num} — {title}", subsection))
+        story.append(Paragraph(desc, small))
+        frame = report_data.get(key)
+        if frame is None or frame.empty:
+            story.append(Paragraph("Aucune donnée renseignée pour cette rubrique.", body))
+        else:
+            story.append(_pdf_table(frame, body, head))
+        story.append(Spacer(1, 6))
+
+    story.append(PageBreak())
+
+    # ------------------------------------------------------------
+    # 07 — PROFIL
+    # ------------------------------------------------------------
+    story.extend(_pdf_section_header(
+        "07", "PROFIL",
+        "Identité et rôle dans la plateforme.",
+        section
+    ))
+
+    profile_name = report_profile.get("nom", "Ndeye Fota Gueye")
+    profile_function = report_profile.get(
+        "fonction",
+        "Chargée de la communication et documentation de CRA/ISRA Saint-Louis"
+    )
+
+    profile_rows = [
+        ["Élément", "Information"],
+        ["Nom", profile_name],
+        ["Fonction", profile_function],
+        ["Périmètre", "Communication • Documentation • IST • Bibliothèque • Résultat scientifique"],
+        ["Période du rapport", f"{start or '—'} → {end or '—'}"],
+        ["Génération", datetime.now().strftime("%d/%m/%Y à %H:%M")],
+    ]
+    profile_df = pd.DataFrame(profile_rows[1:], columns=profile_rows[0])
+    story.append(_pdf_table(profile_df, body, head))
+    story.append(Spacer(1, 12))
+    story.append(
+        Paragraph(
+            "Le rapport est généré automatiquement à partir des informations présentes "
+            "dans la base PostgreSQL/Supabase de l'application au moment de l'export.",
+            small,
+        )
+    )
+
+    doc.build(
+        story,
+        onFirstPage=_pdf_header_footer,
+        onLaterPages=_pdf_header_footer,
+    )
     return bio.getvalue()
 
 def export_buttons(data, base_name, title):
@@ -1417,50 +1955,327 @@ def render_scientific_results():
 
 
 def render_reports():
+    """Centre de rapports : structure identique à la nouvelle navigation."""
     st.header("📊 Rapports, statistiques et exports")
+    st.caption(
+        "Rapport premium aligné sur l'organisation actuelle : "
+        "Communication • Documentations • Résultat scientifique • Visiteurs • Valorisation chercheurs."
+    )
+
     st.markdown("""
-    <div class="card" style="background:linear-gradient(135deg,#083B66,#0B74B8);color:white;border:none;animation:fadeInUp .55s ease-out;">
-      <div style="font-size:.78rem;letter-spacing:.12em;opacity:.8;">PROFIL RESPONSABLE</div>
-      <div style="font-size:1.55rem;font-weight:800;margin-top:5px;">Ndeye Fota Gueye</div>
-      <div style="font-size:.95rem;margin-top:4px;opacity:.94;">Chargée de la communication et documentation de CRA/ISRA Saint-Louis</div>
+    <div class="card" style="background:linear-gradient(135deg,#062A49,#0B74B8 65%,#2D8A4A);
+         color:white;border:none;animation:fadeInUp .55s ease-out;">
+      <div style="font-size:.72rem;letter-spacing:.15em;opacity:.78;">RAPPORT PREMIUM • CRA / ISRA</div>
+      <div style="font-size:1.65rem;font-weight:800;margin-top:6px;">IST et Communication</div>
+      <div style="font-size:.95rem;margin-top:5px;opacity:.94;">
+        Rapport structuré selon les espaces métiers de la nouvelle application.
+      </div>
     </div>
     """, unsafe_allow_html=True)
-    c1,c2=st.columns(2); start=c1.date_input("Du",date(date.today().year,1,1)); end=c2.date_input("Au",date.today())
-    st.subheader("Indicateurs sur la période")
-    vals=[
-        ("Activités",scalar("SELECT COUNT(*) FROM activities WHERE date_activite BETWEEN ? AND ?",(str(start),str(end)))),
-        ("Visiteurs",scalar("SELECT COUNT(*) FROM library_visits WHERE date_visite BETWEEN ? AND ?",(str(start),str(end)))),
-        ("Consultations",scalar("SELECT COUNT(*) FROM consultations WHERE date_consultation BETWEEN ? AND ?",(str(start),str(end)))),
-        ("Prêts",scalar("SELECT COUNT(*) FROM loans WHERE date_emprunt BETWEEN ? AND ?",(str(start),str(end)))),
-        ("Communications",scalar("SELECT COUNT(*) FROM communications WHERE date_publication BETWEEN ? AND ?",(str(start),str(end)))),
-        ("Médias",scalar("SELECT COUNT(*) FROM media WHERE date_intervention BETWEEN ? AND ?",(str(start),str(end)))),
-        ("Productions audiovisuelles",scalar("SELECT COUNT(*) FROM audiovisual WHERE date_production BETWEEN ? AND ?",(str(start),str(end)))),
-        ("Résultats scientifiques",scalar("SELECT COUNT(*) FROM scientific_results WHERE created_at::date BETWEEN ? AND ?",(str(start),str(end)))),
-        ("Notes politiques / synthèses",scalar("SELECT COUNT(*) FROM scientific_publications WHERE created_at::date BETWEEN ? AND ?",(str(start),str(end)))),
+
+    c1, c2 = st.columns(2)
+    start = c1.date_input(
+        "Du",
+        date(date.today().year, 1, 1),
+        key="report_start_date",
+    )
+    end = c2.date_input(
+        "Au",
+        date.today(),
+        key="report_end_date",
+    )
+
+    if start > end:
+        st.error("La date de début doit être antérieure ou égale à la date de fin.")
+        return
+
+    # ============================================================
+    # DONNÉES DE LA NOUVELLE STRUCTURE
+    # ============================================================
+    activities = df(
+        "SELECT * FROM activities "
+        "WHERE date_activite BETWEEN ? AND ? "
+        "ORDER BY date_activite, id",
+        (str(start), str(end)),
+    )
+
+    communications = df(
+        "SELECT * FROM communications "
+        "WHERE date_publication BETWEEN ? AND ? "
+        "ORDER BY date_publication, id",
+        (str(start), str(end)),
+    )
+
+    media_df = df(
+        "SELECT * FROM media "
+        "WHERE date_intervention BETWEEN ? AND ? "
+        "ORDER BY date_intervention, id",
+        (str(start), str(end)),
+    )
+
+    av = df(
+        "SELECT * FROM audiovisual "
+        "WHERE date_production BETWEEN ? AND ? "
+        "ORDER BY date_production, id",
+        (str(start), str(end)),
+    )
+
+    formats = df(
+        "SELECT * FROM communication_formats "
+        "ORDER BY categorie, nom_format"
+    )
+
+    documents = df(
+        "SELECT * FROM documents "
+        "ORDER BY annee DESC, id DESC"
+    )
+
+    library = df(
+        "SELECT * FROM library_items "
+        "ORDER BY titre"
+    )
+
+    consultations = df(
+        "SELECT c.id, c.date_consultation, "
+        "p.nom || ' ' || COALESCE(p.prenom,'') AS personne, "
+        "i.titre AS document, c.heure, c.type_consultation, c.observations "
+        "FROM consultations c "
+        "LEFT JOIN people p ON p.id=c.person_id "
+        "LEFT JOIN library_items i ON i.id=c.item_id "
+        "WHERE c.date_consultation BETWEEN ? AND ? "
+        "ORDER BY c.date_consultation, c.id",
+        (str(start), str(end)),
+    )
+
+    loans = df(
+        "SELECT l.id, l.date_emprunt, l.date_retour_prevue, l.date_retour_reelle, "
+        "l.statut, l.observations, "
+        "p.nom || ' ' || COALESCE(p.prenom,'') AS emprunteur, "
+        "i.titre AS document "
+        "FROM loans l "
+        "LEFT JOIN people p ON p.id=l.person_id "
+        "LEFT JOIN library_items i ON i.id=l.item_id "
+        "WHERE l.date_emprunt BETWEEN ? AND ? "
+        "ORDER BY l.date_emprunt, l.id",
+        (str(start), str(end)),
+    )
+
+    people = df(
+        "SELECT id, nom, prenom, fonction, structure, categorie, telephone, email, "
+        "localite, region, observations "
+        "FROM people ORDER BY nom, prenom"
+    )
+
+    visits = df(
+        "SELECT v.id, v.date_visite, "
+        "COALESCE(v.visitor_name, TRIM(COALESCE(p.nom,'') || ' ' || COALESCE(p.prenom,''))) AS visiteur, "
+        "COALESCE(v.visitor_structure,p.structure) AS structure, "
+        "COALESCE(v.visitor_categorie,p.categorie) AS categorie, "
+        "v.visitor_contact, v.visitor_email, v.visitor_lien, "
+        "v.heure_arrivee, v.heure_depart, v.motif, "
+        "v.documents_consultes, v.documents_empruntes, v.observations "
+        "FROM library_visits v "
+        "LEFT JOIN people p ON p.id=v.person_id "
+        "WHERE v.date_visite BETWEEN ? AND ? "
+        "ORDER BY v.date_visite, v.id",
+        (str(start), str(end)),
+    )
+
+    scientific = df(
+        "SELECT * FROM scientific_results "
+        "WHERE created_at::date BETWEEN ? AND ? "
+        "ORDER BY annee DESC, id DESC",
+        (str(start), str(end)),
+    )
+
+    publications = df(
+        "SELECT * FROM scientific_publications "
+        "WHERE created_at::date BETWEEN ? AND ? "
+        "ORDER BY annee DESC, id DESC",
+        (str(start), str(end)),
+    )
+
+    profiles = df(
+        "SELECT id, nom, prenom, grade_fonction, unite_laboratoire, "
+        "domaine_expertise, mots_cles, biographie, profil_complet, email, "
+        "telephone, ORCID, lien_profil, observations "
+        "FROM researcher_profiles ORDER BY nom, prenom"
+    )
+
+    research_data = df("""
+        SELECT
+            rv.id,
+            STRING_AGG(
+                TRIM(COALESCE(rp.prenom,'') || ' ' || rp.nom),
+                ', ' ORDER BY rp.nom
+            ) AS chercheurs,
+            rv.date_action,
+            rv.domaine,
+            rv.thematique,
+            rv.projet,
+            rv.type_valorisation,
+            rv.support,
+            rv.lien,
+            rv.observations
+        FROM researcher_valorization rv
+        LEFT JOIN researcher_valorization_researchers rvr
+            ON rvr.valorization_id=rv.id
+        LEFT JOIN researcher_profiles rp
+            ON rp.id=rvr.researcher_id
+        WHERE rv.date_action BETWEEN ? AND ?
+        GROUP BY rv.id
+        ORDER BY rv.date_action, rv.id
+    """, (str(start), str(end)))
+
+    # ============================================================
+    # INDICATEURS — même logique que les nouvelles rubriques
+    # ============================================================
+    st.subheader("📌 Indicateurs sur la période")
+
+    vals = [
+        ("Activités", len(activities)),
+        ("Actions de communication", len(communications)),
+        ("Presse & médias", len(media_df)),
+        ("Audiovisuel", len(av)),
+        ("Documents IST", len(documents)),
+        ("Consultations", len(consultations)),
+        ("Prêts", len(loans)),
+        ("Résultats scientifiques", len(scientific)),
+        ("Publications scientifiques", len(publications)),
+        ("Visiteurs", len(visits)),
+        ("Valorisations", len(research_data)),
+        ("Profils chercheurs", len(profiles)),
     ]
-    cols=st.columns(4)
-    for i,(label,val) in enumerate(vals):
-        with cols[i%4]: st.metric(label,val)
-    activities=df("SELECT * FROM activities WHERE date_activite BETWEEN ? AND ? ORDER BY date_activite",(str(start),str(end)))
-    visits=df("SELECT * FROM library_visits WHERE date_visite BETWEEN ? AND ? ORDER BY date_visite",(str(start),str(end)))
-    loans=df("SELECT * FROM loans WHERE date_emprunt BETWEEN ? AND ? ORDER BY date_emprunt",(str(start),str(end)))
-    communications=df("SELECT * FROM communications WHERE date_publication BETWEEN ? AND ? ORDER BY date_publication",(str(start),str(end)))
-    media_df=df("SELECT * FROM media WHERE date_intervention BETWEEN ? AND ? ORDER BY date_intervention",(str(start),str(end)))
-    av=df("SELECT * FROM audiovisual WHERE date_production BETWEEN ? AND ? ORDER BY date_production",(str(start),str(end)))
-    documents=df("SELECT * FROM documents ORDER BY annee DESC,id DESC")
-    library=df("SELECT * FROM library_items ORDER BY titre")
-    scientific=df("SELECT * FROM scientific_results ORDER BY annee DESC,id DESC")
-    publications=df("SELECT * FROM scientific_publications ORDER BY annee DESC,id DESC")
-    formats=df("SELECT * FROM communication_formats ORDER BY categorie,nom_format")
-    report_data={"Activités":activities,"Visiteurs":visits,"Prêts":loans,"Communication":communications,"Médias":media_df,"Audiovisuel":av,"Formats":formats,"Documents IST":documents,"Bibliothèque":library,"Résultats scientifiques":scientific,"Publications scientifiques":publications}
-    full_pdf=complete_report_pdf(report_data,start,end)
+
+    cols = st.columns(4)
+    for i, (label, val) in enumerate(vals):
+        with cols[i % 4]:
+            st.metric(label, val)
+
+    # ============================================================
+    # RAPPORT PREMIUM COMPLET
+    # ============================================================
+    report_data = {
+        "Activités": activities,
+        "Communication": communications,
+        "Médias": media_df,
+        "Audiovisuel": av,
+        "Formats": formats,
+        "Documents IST": documents,
+        "Bibliothèque": library,
+        "Consultations": consultations,
+        "Prêts": loans,
+        "Personnes": people,
+        "Résultats scientifiques": scientific,
+        "Publications scientifiques": publications,
+        "Visiteurs": visits,
+        "Profils chercheurs": profiles,
+        "Valorisation chercheurs": research_data,
+    }
+
+    full_pdf = complete_report_pdf(
+        report_data,
+        start,
+        end,
+        report_profile={
+            "nom": "Ndeye Fota Gueye",
+            "fonction": "Chargée de la communication et documentation de CRA/ISRA Saint-Louis",
+        },
+    )
+
+    st.markdown("### ✨ Rapport premium")
     if full_pdf is not None:
-        st.download_button("✨ Télécharger le RAPPORT COMPLET A4 — design premium",full_pdf,"rapport_ist_communication_complet_A4.pdf","application/pdf",type="primary",use_container_width=True)
-    st.download_button("⬇️ Télécharger le rapport Excel complet",excel_bytes(report_data),"rapport_ist_communication_complet.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",type="primary")
-    summary=pd.DataFrame({"Indicateur":[x[0] for x in vals],"Valeur":[x[1] for x in vals],"Période":[f"{start} → {end}"]*len(vals)})
-    export_buttons(summary,"synthese_ist_communication","Synthèse du rapport IST et Communication")
-    st.subheader("Aperçu des activités"); st.dataframe(activities,use_container_width=True,hide_index=True)
-    st.subheader("Aperçu scientifique"); st.dataframe(scientific,use_container_width=True,hide_index=True)
+        st.download_button(
+            "✨ Télécharger le RAPPORT PREMIUM COMPLET — A4",
+            full_pdf,
+            "rapport_premium_ist_communication_CRA_ISRA.pdf",
+            "application/pdf",
+            type="primary",
+            use_container_width=True,
+        )
+    else:
+        st.error("Le module ReportLab n'est pas disponible : installez reportlab.")
+
+    # Excel complet conservant toutes les données
+    st.download_button(
+        "⬇️ Télécharger le rapport Excel complet",
+        excel_bytes(report_data),
+        "rapport_premium_ist_communication_CRA_ISRA.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary",
+        use_container_width=True,
+    )
+
+    summary = pd.DataFrame({
+        "Espace": [x[0] for x in vals],
+        "Nombre": [x[1] for x in vals],
+        "Période": [f"{start} → {end}"] * len(vals),
+    })
+    export_buttons(
+        summary,
+        "synthese_premium_ist_communication",
+        "Synthèse premium — IST et Communication",
+    )
+
+    # ============================================================
+    # APERÇU À L'ÉCRAN — même ordre que le PDF
+    # ============================================================
+    st.markdown("### 👁️ Aperçu du rapport")
+
+    with st.expander("📣 02 — Communication", expanded=True):
+        st.dataframe(
+            activities,
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.dataframe(
+            communications,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    with st.expander("📚 03 — Documentations"):
+        st.dataframe(
+            documents,
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.dataframe(
+            library,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    with st.expander("🔬 04 — Résultat scientifique"):
+        st.dataframe(
+            scientific,
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.dataframe(
+            publications,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    with st.expander("👥 05 — Visiteurs"):
+        st.dataframe(
+            visits,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+    with st.expander("🧬 06 — Valorisation chercheurs"):
+        st.dataframe(
+            profiles,
+            use_container_width=True,
+            hide_index=True,
+        )
+        st.dataframe(
+            research_data,
+            use_container_width=True,
+            hide_index=True,
+        )
 
 
 # -----------------------------
