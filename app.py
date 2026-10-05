@@ -631,11 +631,72 @@ def save_uploaded(uploaded, subdir=""):
         return ""
     return upload_to_supabase(uploaded, subdir)
 
+def _excel_safe_dataframe(data):
+    """Prépare un DataFrame pour Excel sans modifier les données en base.
+
+    Supabase/PostgreSQL peut renvoyer des timestamps avec fuseau horaire,
+    ainsi que des listes/dictionnaires. openpyxl refuse notamment les
+    datetime timezone-aware. On convertit uniquement la copie destinée à
+    l'export Excel et on conserve les données originales dans l'application.
+    """
+    if data is None:
+        return pd.DataFrame()
+
+    out = data.copy()
+
+    for col in out.columns:
+        series = out[col]
+
+        # Excel/openpyxl n'accepte pas les datetime avec timezone.
+        if pd.api.types.is_datetime64_any_dtype(series):
+            try:
+                if getattr(series.dt, "tz", None) is not None:
+                    out[col] = series.dt.tz_localize(None)
+            except (TypeError, AttributeError):
+                out[col] = series.map(
+                    lambda v: v.replace(tzinfo=None) if hasattr(v, "tzinfo") and v.tzinfo else v
+                )
+            continue
+
+        # Les colonnes object peuvent contenir des dates timezone-aware
+        # renvoyées directement par PostgreSQL/Supabase.
+        if series.dtype == "object":
+            def safe_value(value):
+                if value is None:
+                    return None
+                if isinstance(value, (list, tuple, set, dict)):
+                    return json.dumps(value, ensure_ascii=False, default=str)
+                if isinstance(value, (datetime, pd.Timestamp)):
+                    if getattr(value, "tzinfo", None) is not None:
+                        try:
+                            return value.replace(tzinfo=None)
+                        except Exception:
+                            return str(value)
+                    return value
+                try:
+                    missing = pd.isna(value)
+                    if isinstance(missing, bool) and missing:
+                        return None
+                except Exception:
+                    pass
+                if hasattr(value, "tzinfo") and value.tzinfo is not None:
+                    try:
+                        return value.replace(tzinfo=None)
+                    except Exception:
+                        return str(value)
+                return value
+            out[col] = series.map(safe_value)
+
+    return out
+
+
 def excel_bytes(dataframes):
+    """Génère un fichier Excel robuste pour les données CRA/ISRA."""
     bio = io.BytesIO()
     with pd.ExcelWriter(bio, engine="openpyxl") as writer:
         for name, data in dataframes.items():
-            data.to_excel(writer, sheet_name=name[:31], index=False)
+            safe_data = _excel_safe_dataframe(data)
+            safe_data.to_excel(writer, sheet_name=str(name)[:31], index=False)
     return bio.getvalue()
 
 
