@@ -178,6 +178,12 @@ header[data-testid="stHeader"] { background: #0b4f8a; }
 }
 .hero h1 { margin:0; font-size:2rem; }\n.hero-badge { display:inline-block; margin-bottom:10px; padding:5px 12px; border-radius:999px; background:rgba(255,255,255,.16); font-size:.78rem; letter-spacing:.08em; text-transform:uppercase; }\n.login-card { max-width:520px; margin:8vh auto; background:white; padding:32px; border-radius:24px; box-shadow:0 12px 45px rgba(20,60,100,.16); border:1px solid #dfeaf3; animation:fadeInUp .6s ease-out; }\n.brand-strip { display:flex; gap:10px; align-items:center; justify-content:center; margin-bottom:16px; }\n.brand-dot { width:12px; height:12px; border-radius:50%; background:#2d8a4a; box-shadow:0 0 0 5px rgba(45,138,74,.12); animation:pulse 2s infinite; }\n@keyframes fadeInDown { from {opacity:0; transform:translateY(-14px)} to {opacity:1; transform:translateY(0)} }\n@keyframes fadeInUp { from {opacity:0; transform:translateY(18px)} to {opacity:1; transform:translateY(0)} }\n@keyframes pulse { 0%,100% {transform:scale(1)} 50% {transform:scale(1.25)} }
 .hero p { margin:8px 0 0; opacity:.92; }
+.section-banner { background:linear-gradient(135deg,#061f3a,#0b74b8 58%,#2d8a4a); color:#fff; border-radius:28px; padding:24px 30px; margin:18px 0 26px; box-shadow:0 18px 55px rgba(6,31,58,.18); }
+.section-banner span { display:block; font-size:.72rem; letter-spacing:.18em; opacity:.72; margin-bottom:6px; }
+.section-banner strong { font-size:1.45rem; }
+.stTabs [data-baseweb="tab-list"] { gap:10px; padding:8px; background:rgba(255,255,255,.78); border-radius:20px; box-shadow:0 10px 30px rgba(20,60,100,.08); }
+.stTabs [data-baseweb="tab"] { min-height:48px; padding:10px 18px; border-radius:14px; font-weight:800; }
+[data-testid="stMetric"] { border-radius:20px; padding:18px; box-shadow:0 10px 30px rgba(20,60,100,.08); background:rgba(255,255,255,.92); }
 .card {
     background:white; padding:18px; border-radius:15px;
     box-shadow:0 3px 14px rgba(20,60,100,.08);
@@ -466,6 +472,31 @@ def init_db():
             lien TEXT,
             observations TEXT
         );
+        CREATE TABLE IF NOT EXISTS researcher_profiles (
+            id BIGSERIAL PRIMARY KEY,
+            nom TEXT NOT NULL,
+            prenom TEXT,
+            grade_fonction TEXT,
+            unite_laboratoire TEXT,
+            domaine_expertise TEXT,
+            mots_cles TEXT,
+            biographie TEXT,
+            profil_complet TEXT,
+            email TEXT,
+            telephone TEXT,
+            ORCID TEXT,
+            photo TEXT,
+            cv_fichier TEXT,
+            lien_profil TEXT,
+            observations TEXT,
+            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS researcher_valorization_researchers (
+            id BIGSERIAL PRIMARY KEY,
+            valorization_id BIGINT NOT NULL REFERENCES researcher_valorization(id) ON DELETE CASCADE,
+            researcher_id BIGINT NOT NULL REFERENCES researcher_profiles(id) ON DELETE CASCADE,
+            UNIQUE(valorization_id,researcher_id)
+        );
         CREATE TABLE IF NOT EXISTS evidence (
             id BIGSERIAL PRIMARY KEY,
             activity_id BIGINT REFERENCES activities(id) ON DELETE CASCADE,
@@ -529,6 +560,8 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_storage_documents ON documents(fichier);
         CREATE INDEX IF NOT EXISTS idx_storage_library ON library_items(fichier);
         CREATE INDEX IF NOT EXISTS idx_scientific_results_type ON scientific_results(type_resultat);
+        CREATE INDEX IF NOT EXISTS idx_researcher_profiles_name ON researcher_profiles(nom,prenom);
+        CREATE INDEX IF NOT EXISTS idx_researcher_valorization_link ON researcher_valorization_researchers(valorization_id,researcher_id);
         CREATE INDEX IF NOT EXISTS idx_scientific_publications_type ON scientific_publications(type_publication);
         """)
         conn.commit()
@@ -913,105 +946,113 @@ def render_activities():
     export_buttons(data, "activites", "Activités CRA/ISRA")
 
 
+def _communication_actions():
+    st.subheader("📣 Actions de communication et diffusion")
+    acts=df("SELECT id,reference,titre FROM activities ORDER BY date_activite DESC")
+    actmap={f"{r.reference} — {r.titre}":r.id for r in acts.itertuples()} if not acts.empty else {}
+    with st.form("comm_form_new"):
+        activity_label=st.selectbox("Activité liée (facultatif)",["—"]+list(actmap))
+        c1,c2,c3=st.columns(3)
+        titre=c1.text_input("Titre *"); type_action=c2.selectbox("Type d'action",["Affiche","Invitation","Communiqué","Dossier de presse","Article","Reportage","Interview","Photographie","Vidéo","Film","Brochure","Plaquette","Kakemono","Publication web","Autre"])
+        plateforme=c3.selectbox("Plateforme",["Site web","Facebook","LinkedIn","YouTube","WhatsApp","Radio","Télévision","Presse écrite","Autre"])
+        c1,c2,c3=st.columns(3)
+        dp=c1.date_input("Date de publication",date.today()); lien=c2.text_input("Lien"); vues=c3.number_input("Vues",0,step=1)
+        c1,c2,c3=st.columns(3)
+        reactions=c1.number_input("Réactions",0,step=1); commentaires=c2.number_input("Commentaires",0,step=1); partages=c3.number_input("Partages",0,step=1)
+        telechargements=st.number_input("Téléchargements",0,step=1)
+        observations=st.text_area("Observations")
+        ok=st.form_submit_button("💾 Enregistrer",type="primary")
+    if ok:
+        if not titre.strip(): st.error("Le titre est obligatoire.")
+        else:
+            q("""INSERT INTO communications(activity_id,titre,type_action,plateforme,date_publication,lien,vues,reactions,commentaires,partages,telechargements,observations)
+                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",(actmap.get(activity_label),titre,type_action,plateforme,str(dp),lien,vues,reactions,commentaires,partages,telechargements,observations))
+            st.success("Action de communication enregistrée."); st.rerun()
+    data=df("SELECT * FROM communications ORDER BY date_publication DESC")
+    st.dataframe(data,use_container_width=True,hide_index=True)
+    export_buttons(data,"communication","Actions de communication CRA/ISRA")
+
+def _communication_media():
+    st.subheader("📰 Presse et médias")
+    with st.form("media_form_new"):
+        c1,c2,c3=st.columns(3)
+        media_name=c1.text_input("Nom du média *"); media_type=c2.selectbox("Type",["Télévision","Radio","Presse écrite","Presse en ligne","Magazine","Site web","Autre"]); journaliste=c3.text_input("Journaliste")
+        c1,c2,c3=st.columns(3)
+        interviewee=c1.text_input("Personne interviewée"); sujet=c2.text_input("Sujet"); di=c3.date_input("Date",date.today())
+        lieu=st.text_input("Lieu"); type_intervention=st.selectbox("Type d'intervention",["Interview","Reportage","Article","Émission","Conférence de presse","Autre"]); lien=st.text_input("Lien")
+        observations=st.text_area("Observations")
+        ok=st.form_submit_button("💾 Enregistrer",type="primary")
+    if ok:
+        if not media_name.strip(): st.error("Le nom du média est obligatoire.")
+        else:
+            q("""INSERT INTO media(media_name,media_type,journaliste,personne_interviewee,sujet,date_intervention,lieu,type_intervention,lien,observations)
+                 VALUES(?,?,?,?,?,?,?,?,?,?)""",(media_name,media_type,journaliste,interviewee,sujet,str(di),lieu,type_intervention,lien,observations))
+            st.success("Intervention média enregistrée."); st.rerun()
+    data=df("SELECT * FROM media ORDER BY date_intervention DESC")
+    st.dataframe(data,use_container_width=True,hide_index=True)
+    export_buttons(data,"medias","Presse et médias CRA/ISRA")
+
+def _communication_audiovisual_formats():
+    st.subheader("🎥 Audiovisuel")
+    with st.form("av_form_new"):
+        c1,c2,c3=st.columns(3)
+        titre=c1.text_input("Titre *"); typ=c2.selectbox("Type",["Film","Vidéo","Interview","Reportage","Documentaire","Autre"]); dp=c3.date_input("Date",date.today())
+        c1,c2,c3=st.columns(3)
+        lieu=c1.text_input("Lieu"); theme=c2.text_input("Thème"); duree=c3.text_input("Durée")
+        interviewes=st.text_area("Personnes interviewées")
+        responsable=st.text_input("Responsable"); statut=c1.selectbox("Statut",["Prévu","En préparation","En production","Terminé","Diffusé"])
+        lien=c2.text_input("Lien de diffusion"); fichier=st.file_uploader("Fichier original",type=["mp4","mov","avi","mkv"])
+        observations=st.text_area("Observations")
+        ok=st.form_submit_button("💾 Enregistrer",type="primary")
+    if ok:
+        if not titre.strip(): st.error("Le titre est obligatoire.")
+        else:
+            path=save_uploaded(fichier,"audiovisuel")
+            q("""INSERT INTO audiovisual(titre,type_production,date_production,lieu,theme,interviewes,duree,responsable,statut,lien,fichier_original,observations)
+                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",(titre,typ,str(dp),lieu,theme,interviewes,duree,responsable,statut,lien,path,observations))
+            st.success("Production enregistrée."); st.rerun()
+    data=df("SELECT * FROM audiovisual ORDER BY date_production DESC")
+    st.dataframe(data,use_container_width=True,hide_index=True)
+    export_buttons(data,"audiovisuel","Productions audiovisuelles CRA/ISRA")
+    st.divider()
+    st.subheader("🧩 Formats de communication et de production")
+    with st.form("format_form"):
+        c1,c2=st.columns(2)
+        categorie=c1.selectbox("Catégorie",["Communication","Média","Audiovisuel","Documentation","Scientifique","Numérique","Événementiel"])
+        nom_format=c2.text_input("Nom du format *")
+        description=st.text_area("Description")
+        usage=st.text_area("Usage recommandé")
+        norme=st.text_input("Norme / dimensions / spécification")
+        lien_ref=st.text_input("Lien de référence")
+        observations=st.text_area("Observations")
+        ok=st.form_submit_button("💾 Enregistrer le format",type="primary")
+    if ok:
+        if not nom_format.strip(): st.error("Le nom du format est obligatoire.")
+        else:
+            q("""INSERT INTO communication_formats(categorie,nom_format,description,usage_recommande,norme,lien_reference,observations)
+                 VALUES(?,?,?,?,?,?,?)""",(categorie,nom_format,description,usage,norme,lien_ref,observations))
+            st.success("Format enregistré."); st.rerun()
+    formats=df("SELECT id,categorie,nom_format,description,usage_recommande,norme,lien_reference,observations FROM communication_formats ORDER BY categorie,nom_format")
+    st.dataframe(formats,use_container_width=True,hide_index=True)
+    export_buttons(formats,"formats_communication","Formats de communication et production")
+
+
 def render_communication():
     st.header("📣 Communication")
-    st.caption("Espace regroupé : activités → communication, médias, audiovisuel et formats.")
-    t1, t2, t3, t4 = st.tabs(["🗓️ Activités", "📣 Communication", "📰 Médias", "🎥 Audiovisuel & formats"])
-    with t1:
-        render_activities()
-    with t2:
-        st.subheader("📣 Actions de communication et diffusion")
-        acts=df("SELECT id,reference,titre FROM activities ORDER BY date_activite DESC")
-        actmap={f"{r.reference} — {r.titre}":r.id for r in acts.itertuples()} if not acts.empty else {}
-        with st.form("comm_form_new"):
-            activity_label=st.selectbox("Activité liée (facultatif)",["—"]+list(actmap))
-            c1,c2,c3=st.columns(3)
-            titre=c1.text_input("Titre *"); type_action=c2.selectbox("Type d'action",["Affiche","Invitation","Communiqué","Dossier de presse","Article","Reportage","Interview","Photographie","Vidéo","Film","Brochure","Plaquette","Kakemono","Publication web","Autre"])
-            plateforme=c3.selectbox("Plateforme",["Site web","Facebook","LinkedIn","YouTube","WhatsApp","Radio","Télévision","Presse écrite","Autre"])
-            c1,c2,c3=st.columns(3)
-            dp=c1.date_input("Date de publication",date.today()); lien=c2.text_input("Lien"); vues=c3.number_input("Vues",0,step=1)
-            c1,c2,c3=st.columns(3)
-            reactions=c1.number_input("Réactions",0,step=1); commentaires=c2.number_input("Commentaires",0,step=1); partages=c3.number_input("Partages",0,step=1)
-            telechargements=st.number_input("Téléchargements",0,step=1)
-            observations=st.text_area("Observations")
-            ok=st.form_submit_button("💾 Enregistrer",type="primary")
-        if ok:
-            if not titre.strip(): st.error("Le titre est obligatoire.")
-            else:
-                q("""INSERT INTO communications(activity_id,titre,type_action,plateforme,date_publication,lien,vues,reactions,commentaires,partages,telechargements,observations)
-                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",(actmap.get(activity_label),titre,type_action,plateforme,str(dp),lien,vues,reactions,commentaires,partages,telechargements,observations))
-                st.success("Action de communication enregistrée."); st.rerun()
-        data=df("SELECT * FROM communications ORDER BY date_publication DESC")
-        st.dataframe(data,use_container_width=True,hide_index=True)
-        export_buttons(data,"communication","Actions de communication CRA/ISRA")
-    with t3:
-        st.subheader("📰 Presse et médias")
-        with st.form("media_form_new"):
-            c1,c2,c3=st.columns(3)
-            media_name=c1.text_input("Nom du média *"); media_type=c2.selectbox("Type",["Télévision","Radio","Presse écrite","Presse en ligne","Magazine","Site web","Autre"]); journaliste=c3.text_input("Journaliste")
-            c1,c2,c3=st.columns(3)
-            interviewee=c1.text_input("Personne interviewée"); sujet=c2.text_input("Sujet"); di=c3.date_input("Date",date.today())
-            lieu=st.text_input("Lieu"); type_intervention=st.selectbox("Type d'intervention",["Interview","Reportage","Article","Émission","Conférence de presse","Autre"]); lien=st.text_input("Lien")
-            observations=st.text_area("Observations")
-            ok=st.form_submit_button("💾 Enregistrer",type="primary")
-        if ok:
-            if not media_name.strip(): st.error("Le nom du média est obligatoire.")
-            else:
-                q("""INSERT INTO media(media_name,media_type,journaliste,personne_interviewee,sujet,date_intervention,lieu,type_intervention,lien,observations)
-                     VALUES(?,?,?,?,?,?,?,?,?,?)""",(media_name,media_type,journaliste,interviewee,sujet,str(di),lieu,type_intervention,lien,observations))
-                st.success("Intervention média enregistrée."); st.rerun()
-        data=df("SELECT * FROM media ORDER BY date_intervention DESC")
-        st.dataframe(data,use_container_width=True,hide_index=True)
-        export_buttons(data,"medias","Presse et médias CRA/ISRA")
-    with t4:
-        st.subheader("🎥 Audiovisuel")
-        with st.form("av_form_new"):
-            c1,c2,c3=st.columns(3)
-            titre=c1.text_input("Titre *"); typ=c2.selectbox("Type",["Film","Vidéo","Interview","Reportage","Documentaire","Autre"]); dp=c3.date_input("Date",date.today())
-            c1,c2,c3=st.columns(3)
-            lieu=c1.text_input("Lieu"); theme=c2.text_input("Thème"); duree=c3.text_input("Durée")
-            interviewes=st.text_area("Personnes interviewées")
-            responsable=st.text_input("Responsable"); statut=c1.selectbox("Statut",["Prévu","En préparation","En production","Terminé","Diffusé"])
-            lien=c2.text_input("Lien de diffusion"); fichier=st.file_uploader("Fichier original",type=["mp4","mov","avi","mkv"])
-            observations=st.text_area("Observations")
-            ok=st.form_submit_button("💾 Enregistrer",type="primary")
-        if ok:
-            if not titre.strip(): st.error("Le titre est obligatoire.")
-            else:
-                path=save_uploaded(fichier,"audiovisuel")
-                q("""INSERT INTO audiovisual(titre,type_production,date_production,lieu,theme,interviewes,duree,responsable,statut,lien,fichier_original,observations)
-                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",(titre,typ,str(dp),lieu,theme,interviewes,duree,responsable,statut,lien,path,observations))
-                st.success("Production enregistrée."); st.rerun()
-        data=df("SELECT * FROM audiovisual ORDER BY date_production DESC")
-        st.dataframe(data,use_container_width=True,hide_index=True)
-        export_buttons(data,"audiovisuel","Productions audiovisuelles CRA/ISRA")
-        st.divider()
-        st.subheader("🧩 Formats de communication et de production")
-        with st.form("format_form"):
-            c1,c2=st.columns(2)
-            categorie=c1.selectbox("Catégorie",["Communication","Média","Audiovisuel","Documentation","Scientifique","Numérique","Événementiel"])
-            nom_format=c2.text_input("Nom du format *")
-            description=st.text_area("Description")
-            usage=st.text_area("Usage recommandé")
-            norme=st.text_input("Norme / dimensions / spécification")
-            lien_ref=st.text_input("Lien de référence")
-            observations=st.text_area("Observations")
-            ok=st.form_submit_button("💾 Enregistrer le format",type="primary")
-        if ok:
-            if not nom_format.strip(): st.error("Le nom du format est obligatoire.")
-            else:
-                q("""INSERT INTO communication_formats(categorie,nom_format,description,usage_recommande,norme,lien_reference,observations)
-                     VALUES(?,?,?,?,?,?,?)""",(categorie,nom_format,description,usage,norme,lien_ref,observations))
-                st.success("Format enregistré."); st.rerun()
-        formats=df("SELECT id,categorie,nom_format,description,usage_recommande,norme,lien_reference,observations FROM communication_formats ORDER BY categorie,nom_format")
-        st.dataframe(formats,use_container_width=True,hide_index=True)
-        export_buttons(formats,"formats_communication","Formats de communication et production")
-
+    st.caption("Espace XXL de pilotage des activités, de la communication, des médias et de la production audiovisuelle.")
+    st.markdown('<div class="section-banner"><span>ACTIVITÉS & COMMUNICATION</span><strong>Un seul espace, une organisation sans doublons</strong></div>', unsafe_allow_html=True)
+    st.subheader("🗓️ Activités")
+    render_activities()
+    st.markdown("### 📚 Sous-espaces de l’activité")
+    t1,t2,t3=st.tabs(["📣 Communication","📰 Médias","🎥 Audiovisuel & formats"])
+    with t1: _communication_actions()
+    with t2: _communication_media()
+    with t3: _communication_audiovisual_formats()
 
 def render_documentations():
     st.header("📚 Documentations")
-    st.caption("Bibliothèque, Documentation IST et gestion des personnes/prêts réunies dans un même espace.")
-    t1,t2,t3=st.tabs(["📚 Biblio","📄 Documentation IST","👥 Personnes & prêts"])
+    st.caption("Un bloc riche pour la Biblio + Documentation IST, complété par Personnes & Prêts.")
+    t1,t2=st.tabs(["📚 Biblio & Documentation IST","👥 Personnes & prêts"])
     with t1:
         st.subheader("📚 Catalogue et gestion des documents")
         with st.form("lib_form_new"):
@@ -1058,7 +1099,8 @@ def render_documentations():
                  ORDER BY c.date_consultation DESC""")
         st.dataframe(consultations_data,use_container_width=True,hide_index=True)
         export_buttons(consultations_data,"consultations","Consultations des documents CRA/ISRA")
-    with t2:
+        st.divider()
+        st.subheader("📄 Documentation IST — recherche, veille, ressources et fonds")
         st.subheader("📄 Documentation IST")
         with st.form("doc_form_new"):
             c1,c2,c3=st.columns(3)
@@ -1083,7 +1125,7 @@ def render_documentations():
         data=df("SELECT id,titre,auteurs,annee,type_document,thematique,reference,statut FROM documents ORDER BY annee DESC,id DESC")
         st.dataframe(data,use_container_width=True,hide_index=True)
         export_buttons(data,"documentation_ist","Documentation IST CRA/ISRA")
-    with t3:
+    with t2:
         ptab, ltab = st.tabs(["👥 Personnes", "📕 Prêts & retours"])
         with ptab:
             st.subheader("👥 Personnes")
@@ -1166,33 +1208,60 @@ def render_visitors():
     st.metric("Nombre total de visiteurs enregistrés",len(visits))
 
     # -----------------------------
-
 def render_researchers():
     st.header("🔬 Valorisation des chercheurs")
-    people=options_people()
-    with st.form("researcher_form"):
-        person_label=st.selectbox("Chercheur",["—"]+list(people))
-        c1,c2,c3=st.columns(3)
-        da=c1.date_input("Date",date.today()); domaine=c2.text_input("Domaine"); theme=c3.text_input("Thématique")
-        projet=st.text_input("Projet")
-        type_val=c1.selectbox("Type de valorisation",["Article","Interview","Portrait","Vidéo","Publication","Communication scientifique","Autre"])
-        support=c2.text_input("Support")
-        lien=c3.text_input("Lien")
-        observations=st.text_area("Observations")
-        ok=st.form_submit_button("💾 Enregistrer",type="primary")
-    if ok:
-        pid=people.get(person_label)
-        q("""INSERT INTO researcher_valorization(person_id,date_action,domaine,thematique,projet,type_valorisation,support,lien,observations)
-             VALUES(?,?,?,?,?,?,?,?,?)""",(pid,str(da),domaine,theme,projet,type_val,support,lien,observations))
-        st.success("Valorisation enregistrée."); st.rerun()
-    research_data = df("""SELECT rv.id, p.nom||' '||COALESCE(p.prenom,'') AS chercheur, rv.date_action,
-                       rv.domaine,rv.thematique,rv.projet,rv.type_valorisation,rv.support,rv.lien
-                       FROM researcher_valorization rv LEFT JOIN people p ON p.id=rv.person_id
-                       ORDER BY rv.date_action DESC""")
-    st.dataframe(research_data,use_container_width=True,hide_index=True)
-    export_buttons(research_data, "valorisation_chercheurs", "Valorisation des chercheurs CRA/ISRA")
-
-    # -----------------------------
+    st.caption("Profils chercheurs indépendants de la table Personnes : un chercheur peut être créé ici sans être renseigné dans Documentation.")
+    st.markdown('<div class="section-banner"><span>CHERCHEURS</span><strong>Profil • expertise • productions • valorisation</strong></div>', unsafe_allow_html=True)
+    p1,p2=st.tabs(["👨‍🔬 Profils des chercheurs","🚀 Actions de valorisation"])
+    with p1:
+        st.subheader("👨‍🔬 Renseigner un ou plusieurs chercheurs")
+        with st.form("researcher_profile_form", clear_on_submit=True):
+            c1,c2,c3=st.columns(3)
+            nom=c1.text_input("Nom *"); prenom=c2.text_input("Prénom"); fonction=c3.text_input("Grade / fonction")
+            c1,c2,c3=st.columns(3)
+            unite=c1.text_input("Unité / laboratoire"); domaine=c2.text_input("Domaine d’expertise"); mots=c3.text_input("Mots-clés")
+            c1,c2,c3=st.columns(3)
+            email=c1.text_input("E-mail"); telephone=c2.text_input("Téléphone"); orcid=c3.text_input("ORCID")
+            bio=st.text_area("Biographie courte")
+            profil=st.text_area("Profil scientifique complet",height=150)
+            c1,c2=st.columns(2)
+            lien=c1.text_input("Lien du profil / page chercheur"); photo=c2.file_uploader("Photo",type=["png","jpg","jpeg"],key="researcher_photo")
+            cv=st.file_uploader("CV / profil scientifique",type=["pdf","doc","docx"],key="researcher_cv")
+            observations=st.text_area("Observations")
+            ok=st.form_submit_button("💾 Créer le profil chercheur",type="primary")
+        if ok:
+            if not nom.strip(): st.error("Le nom du chercheur est obligatoire.")
+            else:
+                photo_path=save_uploaded(photo,"chercheurs/photos"); cv_path=save_uploaded(cv,"chercheurs/cv")
+                q("""INSERT INTO researcher_profiles(nom,prenom,grade_fonction,unite_laboratoire,domaine_expertise,mots_cles,biographie,profil_complet,email,telephone,ORCID,photo,cv_fichier,lien_profil,observations) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(nom,prenom,fonction,unite,domaine,mots,bio,profil,email,telephone,orcid,photo_path,cv_path,lien,observations))
+                st.success("Profil chercheur créé indépendamment de Documentation."); st.rerun()
+        profiles=df("SELECT id,nom,prenom,grade_fonction,unite_laboratoire,domaine_expertise,email,ORCID,lien_profil FROM researcher_profiles ORDER BY nom,prenom")
+        st.dataframe(profiles,use_container_width=True,hide_index=True)
+        export_buttons(profiles,"profils_chercheurs","Profils des chercheurs CRA/ISRA")
+    with p2:
+        profiles=df("SELECT id,nom,prenom,grade_fonction FROM researcher_profiles ORDER BY nom,prenom")
+        pmap={f"{r.nom} {r.prenom or ''} — {r.grade_fonction or ''}".strip():r.id for r in profiles.itertuples()} if not profiles.empty else {}
+        st.subheader("🚀 Nouvelle action de valorisation")
+        with st.form("researcher_valorization_form_xxl"):
+            chercheurs=st.multiselect("Chercheur(s) concerné(s)",list(pmap.keys()),help="Plusieurs chercheurs peuvent être associés à une même action.")
+            c1,c2,c3=st.columns(3)
+            da=c1.date_input("Date",date.today()); domaine=c2.text_input("Domaine"); theme=c3.text_input("Thématique")
+            projet=st.text_input("Projet")
+            c1,c2,c3=st.columns(3)
+            type_val=c1.selectbox("Type de valorisation",["Article","Interview","Portrait","Vidéo","Publication","Communication scientifique","Conférence","Démonstration","Autre"])
+            support=c2.text_input("Support"); lien=c3.text_input("Lien")
+            observations=st.text_area("Observations")
+            ok=st.form_submit_button("💾 Enregistrer la valorisation",type="primary")
+        if ok:
+            if not chercheurs: st.error("Sélectionnez au moins un chercheur.")
+            else:
+                q("""INSERT INTO researcher_valorization(person_id,date_action,domaine,thematique,projet,type_valorisation,support,lien,observations) VALUES(?,?,?,?,?,?,?,?,?) RETURNING id""",(None,str(da),domaine,theme,projet,type_val,support,lien,observations))
+                vid=scalar("SELECT MAX(id) FROM researcher_valorization")
+                for label in chercheurs: q("INSERT INTO researcher_valorization_researchers(valorization_id,researcher_id) VALUES(?,?) ON CONFLICT DO NOTHING",(vid,pmap[label]))
+                st.success("Valorisation enregistrée pour le ou les chercheurs sélectionnés."); st.rerun()
+        research_data=df("""SELECT rv.id, STRING_AGG(TRIM(COALESCE(rp.prenom,'')||' '||rp.nom), ', ' ORDER BY rp.nom) AS chercheurs, rv.date_action,rv.domaine,rv.thematique,rv.projet,rv.type_valorisation,rv.support,rv.lien FROM researcher_valorization rv LEFT JOIN researcher_valorization_researchers rvr ON rvr.valorization_id=rv.id LEFT JOIN researcher_profiles rp ON rp.id=rvr.researcher_id GROUP BY rv.id ORDER BY rv.date_action DESC""")
+        st.dataframe(research_data,use_container_width=True,hide_index=True)
+        export_buttons(research_data,"valorisation_chercheurs","Valorisation des chercheurs CRA/ISRA")
 
 def render_profile():
     st.markdown("""
