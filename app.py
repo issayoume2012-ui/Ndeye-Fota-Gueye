@@ -973,6 +973,18 @@ def pdf_bytes(data, title="Rapport CRA/ISRA"):
     return bio.getvalue()
 
 
+def _pdf_report_view(frame, columns, labels=None):
+    """Prépare une vue PDF compacte sans supprimer les données originales."""
+    if frame is None or frame.empty:
+        return pd.DataFrame()
+    labels = labels or {}
+    available = [c for c in columns if c in frame.columns]
+    if not available:
+        return frame.copy()
+    out = frame.loc[:, available].copy()
+    out = out.rename(columns={c: labels.get(c, c) for c in available})
+    return out
+
 def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     """
     RAPPORT PREMIUM — nouvelle structure de l'application.
@@ -1231,17 +1243,49 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
         section
     ))
 
+    # Vues PDF lisibles : les DataFrames originaux restent inchangés pour l'Excel.
+    activities_pdf = _pdf_report_view(
+        report_data.get("Activités"),
+        ["id", "date_activite", "titre", "type_activite", "description", "lieu", "responsable", "statut", "observations"],
+        {"id":"ID", "date_activite":"Date", "titre":"Activité", "type_activite":"Type",
+         "description":"Description", "lieu":"Lieu", "responsable":"Responsable",
+         "statut":"Statut", "observations":"Observations"},
+    )
+    communication_pdf = _pdf_report_view(
+        report_data.get("Communication"),
+        ["id", "date_publication", "titre", "type_action", "plateforme", "lien", "vues", "reactions", "commentaires", "partages", "telechargements", "observations"],
+        {"id":"ID", "date_publication":"Date", "titre":"Action", "type_action":"Type",
+         "plateforme":"Plateforme", "lien":"Lien", "vues":"Vues", "reactions":"Réactions",
+         "commentaires":"Commentaires", "partages":"Partages", "telechargements":"Téléchargements",
+         "observations":"Observations"},
+    )
+    media_pdf = _pdf_report_view(
+        report_data.get("Médias"),
+        ["id", "date_intervention", "media_name", "media_type", "journaliste", "personne_interviewee", "sujet", "lieu", "type_intervention", "lien", "observations"],
+        {"id":"ID", "date_intervention":"Date", "media_name":"Média", "media_type":"Type média",
+         "journaliste":"Journaliste", "personne_interviewee":"Personne interviewée", "sujet":"Sujet",
+         "lieu":"Lieu", "type_intervention":"Type intervention", "lien":"Lien", "observations":"Observations"},
+    )
+    audiovisual_pdf = _pdf_report_view(
+        report_data.get("Audiovisuel"),
+        ["id", "date_production", "titre", "type_production", "lieu", "theme", "interviewes", "duree", "responsable", "statut", "lien", "observations"],
+        {"id":"ID", "date_production":"Date", "titre":"Production", "type_production":"Type",
+         "lieu":"Lieu", "theme":"Thème", "interviewes":"Interviewé(s)", "duree":"Durée",
+         "responsable":"Responsable", "statut":"Statut", "lien":"Lien", "observations":"Observations"},
+    )
+    formats_pdf = _pdf_report_view(
+        report_data.get("Formats"),
+        ["id", "categorie", "nom_format", "description", "usage_recommande", "norme", "lien_reference", "observations"],
+        {"id":"ID", "categorie":"Catégorie", "nom_format":"Format", "description":"Description",
+         "usage_recommande":"Usage recommandé", "norme":"Norme", "lien_reference":"Référence", "observations":"Observations"},
+    )
+
     communication_sections = [
-        ("2.1", "Activités — centre de Communication", "Activités déjà enregistrées dans la plateforme et intégrées au rapport Communication.",
-         report_data.get("Activités")),
-        ("2.2", "Actions de communication", "Actions de diffusion et publication.",
-         report_data.get("Communication")),
-        ("2.3", "Presse & médias", "Interventions médias et couverture.",
-         report_data.get("Médias")),
-        ("2.4", "Audiovisuel", "Productions audiovisuelles enregistrées.",
-         report_data.get("Audiovisuel")),
-        ("2.5", "Formats de communication", "Référentiel des formats et usages.",
-         report_data.get("Formats")),
+        ("2.1", "Activités — centre de Communication", "Toutes les activités déjà enregistrées dans la plateforme. Elles constituent le centre de l'espace Communication.", activities_pdf),
+        ("2.2", "Actions de communication", "Toutes les actions de diffusion et de publication enregistrées.", communication_pdf),
+        ("2.3", "Presse & médias", "Toutes les interventions presse et médias enregistrées, avec média, journaliste, sujet, personne interviewée et informations de suivi.", media_pdf),
+        ("2.4", "Audiovisuel", "Toutes les productions audiovisuelles enregistrées.", audiovisual_pdf),
+        ("2.5", "Formats de communication", "Référentiel des formats et usages enregistrés.", formats_pdf),
     ]
 
     for num, title, desc, frame in communication_sections:
@@ -1967,8 +2011,9 @@ def render_reports():
     """Centre de rapports : structure identique à la nouvelle navigation."""
     st.header("📊 Rapports, statistiques et exports")
     st.caption(
-        "Rapport premium aligné sur l'organisation actuelle : "
-        "Communication • Documentations • Résultat scientifique • Visiteurs • Valorisation chercheurs."
+        "Rapport premium global aligné sur l'organisation actuelle : "
+        "Communication • Documentations • Résultat scientifique • Visiteurs • Valorisation chercheurs. "
+        "Toutes les données déjà enregistrées sont reprises, y compris les anciennes saisies."
     )
 
     st.markdown("""
@@ -2010,25 +2055,25 @@ def render_reports():
         "ORDER BY date_activite, id"
     )
 
+    # IMPORTANT : le rapport premium est un rapport GLOBAL de capitalisation.
+    # On ne filtre plus les tables de Communication par la période choisie :
+    # une donnée déjà renseignée doit toujours apparaître dans le rapport.
+    # La période reste affichée sur la couverture et dans les indicateurs pour
+    # contextualiser la génération, tandis que l'intégralité des enregistrements
+    # est conservée dans le PDF et l'Excel.
     communications = df(
         "SELECT * FROM communications "
-        "WHERE date_publication BETWEEN ? AND ? "
-        "ORDER BY date_publication, id",
-        (str(start), str(end)),
+        "ORDER BY date_publication NULLS LAST, id"
     )
 
     media_df = df(
         "SELECT * FROM media "
-        "WHERE date_intervention BETWEEN ? AND ? "
-        "ORDER BY date_intervention, id",
-        (str(start), str(end)),
+        "ORDER BY date_intervention NULLS LAST, id"
     )
 
     av = df(
         "SELECT * FROM audiovisual "
-        "WHERE date_production BETWEEN ? AND ? "
-        "ORDER BY date_production, id",
-        (str(start), str(end)),
+        "ORDER BY date_production NULLS LAST, id"
     )
 
     formats = df(
@@ -2139,9 +2184,14 @@ def render_reports():
     """, (str(start), str(end)))
 
     # ============================================================
-    # INDICATEURS — même logique que les nouvelles rubriques
+    # INDICATEURS — état global des données enregistrées
     # ============================================================
-    st.subheader("📌 Indicateurs sur la période")
+    st.info(
+        f"Rapport global : les données existantes sont incluses. "
+        f"Période de génération sélectionnée : {start} → {end}. "
+        "Cette période ne masque aucune saisie déjà enregistrée."
+    )
+    st.subheader("📌 Indicateurs globaux")
 
     vals = [
         ("Activités", len(activities)),
@@ -2245,6 +2295,12 @@ def render_reports():
             use_container_width=True,
             hide_index=True,
         )
+        st.markdown("**📰 Presse & médias**")
+        st.dataframe(media_df, use_container_width=True, hide_index=True)
+        st.markdown("**🎥 Audiovisuel**")
+        st.dataframe(av, use_container_width=True, hide_index=True)
+        st.markdown("**🧩 Formats de communication**")
+        st.dataframe(formats, use_container_width=True, hide_index=True)
 
     with st.expander("📚 03 — Documentations"):
         st.dataframe(
