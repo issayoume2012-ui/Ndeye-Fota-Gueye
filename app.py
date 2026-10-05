@@ -448,7 +448,13 @@ def init_db():
             date_consultation DATE NOT NULL,
             heure TEXT,
             type_consultation TEXT,
-            observations TEXT
+            observations TEXT,
+            visitor_name TEXT,
+            visitor_structure TEXT,
+            visitor_categorie TEXT,
+            visitor_contact TEXT,
+            visitor_email TEXT,
+            visitor_lien TEXT
         );
         CREATE TABLE IF NOT EXISTS loans (
             id BIGSERIAL PRIMARY KEY,
@@ -556,6 +562,12 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_documents_year ON documents(annee);
         CREATE INDEX IF NOT EXISTS idx_loans_status ON loans(statut);
         CREATE INDEX IF NOT EXISTS idx_visits_date ON library_visits(date_visite);
+        ALTER TABLE library_visits ADD COLUMN IF NOT EXISTS visitor_name TEXT;
+        ALTER TABLE library_visits ADD COLUMN IF NOT EXISTS visitor_structure TEXT;
+        ALTER TABLE library_visits ADD COLUMN IF NOT EXISTS visitor_categorie TEXT;
+        ALTER TABLE library_visits ADD COLUMN IF NOT EXISTS visitor_contact TEXT;
+        ALTER TABLE library_visits ADD COLUMN IF NOT EXISTS visitor_email TEXT;
+        ALTER TABLE library_visits ADD COLUMN IF NOT EXISTS visitor_lien TEXT;
         CREATE INDEX IF NOT EXISTS idx_storage_audiovisual ON audiovisual(fichier_original);
         CREATE INDEX IF NOT EXISTS idx_storage_documents ON documents(fichier);
         CREATE INDEX IF NOT EXISTS idx_storage_library ON library_items(fichier);
@@ -1001,7 +1013,7 @@ def _communication_audiovisual_formats():
         lieu=c1.text_input("Lieu"); theme=c2.text_input("Thème"); duree=c3.text_input("Durée")
         interviewes=st.text_area("Personnes interviewées")
         responsable=st.text_input("Responsable"); statut=c1.selectbox("Statut",["Prévu","En préparation","En production","Terminé","Diffusé"])
-        lien=c2.text_input("Lien de diffusion"); fichier=st.file_uploader("Fichier original",type=["mp4","mov","avi","mkv"])
+        lien=c2.text_input("🔗 Lien de diffusion / vidéo / plateforme"); fichier=None
         observations=st.text_area("Observations")
         ok=st.form_submit_button("💾 Enregistrer",type="primary")
     if ok:
@@ -1067,7 +1079,7 @@ def render_documentations():
             exemplaires=c1.number_input("Exemplaires",1,10000,1); disponibles=c2.number_input("Disponibles",0,10000,1); localisation=c3.text_input("Localisation")
             etat=c1.selectbox("État",["Bon","Moyen","À restaurer","Endommagé"]); format_doc=c2.selectbox("Format",["Papier","Numérique","Papier + numérique"]); lien=c3.text_input("Lien")
             resume=st.text_area("Résumé")
-            fichier=st.file_uploader("Fichier numérique",type=["pdf","doc","docx"],key="libfile_new")
+            fichier=None
             observations=st.text_area("Observations")
             ok=st.form_submit_button("💾 Ajouter au catalogue",type="primary")
         if ok:
@@ -1113,7 +1125,7 @@ def render_documentations():
             c1,c2,c3=st.columns(3)
             langue=c1.text_input("Langue",value="Français"); pages=c2.number_input("Pages",0,step=1); reference=c3.text_input("Référence")
             lien=st.text_input("Lien")
-            fichier=st.file_uploader("Fichier numérique",type=["pdf","doc","docx","txt","xlsx"],key="docfile_new")
+            fichier=None
             statut=st.selectbox("Statut",["Disponible","À vérifier","Archivé"])
             observations=st.text_area("Observations")
             ok=st.form_submit_button("💾 Ajouter le document",type="primary")
@@ -1184,30 +1196,50 @@ def render_documentations():
 
 
 def render_visitors():
-    st.header("👤 Registre des visiteurs")
-    people=options_people()
-    with st.form("visit_form"):
-        person_label=st.selectbox("Personne",["—"]+list(people))
+    st.header("👥 Registre des visiteurs")
+    st.caption("Registre complet des visites : identité, structure, motif, horaires et liens utiles, sans dépendre du module Personnes.")
+    st.markdown('<div class="section-banner"><span>VISITEURS</span><strong>Un registre autonome, riche et centré sur les informations utiles</strong></div>', unsafe_allow_html=True)
+    with st.form("visit_form_xxl", clear_on_submit=True):
         c1,c2,c3=st.columns(3)
-        dv=c1.date_input("Date de visite",date.today()); ha=c2.text_input("Heure d'arrivée"); hd=c3.text_input("Heure de départ")
+        nom_vis=c1.text_input("Nom et prénom du visiteur *")
+        structure_vis=c2.text_input("Structure / institution")
+        categorie_vis=c3.selectbox("Catégorie",["Chercheur","Étudiant","Partenaire","Administration","Entreprise","Média","Visiteur institutionnel","Autre"])
+        c1,c2,c3=st.columns(3)
+        dv=c1.date_input("Date de visite",date.today())
+        ha=c2.text_input("Heure d'arrivée")
+        hd=c3.text_input("Heure de départ")
         motif=st.text_input("Motif de la visite")
-        docs=st.text_area("Documents consultés")
-        emprunts=st.text_area("Documents empruntés")
+        c1,c2,c3=st.columns(3)
+        contact=c1.text_input("Téléphone / contact")
+        email=c2.text_input("E-mail")
+        lien=c3.text_input("🔗 Lien utile / profil / institution")
+        c1,c2=st.columns(2)
+        docs=c1.text_area("Ressources / documents consultés (références ou liens, pas de fichier)")
+        emprunts=c2.text_area("Documents empruntés / références")
         observations=st.text_area("Observations")
         ok=st.form_submit_button("💾 Enregistrer la visite",type="primary")
     if ok:
-        q("""INSERT INTO library_visits(person_id,date_visite,heure_arrivee,heure_depart,motif,documents_consultes,documents_empruntes,observations)
-             VALUES(?,?,?,?,?,?,?,?)""",(people.get(person_label),str(dv),ha,hd,motif,docs,emprunts,observations))
-        st.success("Visite enregistrée."); st.rerun()
-    visits=df("""SELECT v.id,v.date_visite,p.nom||' '||COALESCE(p.prenom,'') AS visiteur,
-                 p.structure,p.categorie,v.heure_arrivee,v.heure_depart,v.motif
+        if not nom_vis.strip():
+            st.error("Le nom du visiteur est obligatoire.")
+        else:
+            q("""INSERT INTO library_visits(person_id,date_visite,heure_arrivee,heure_depart,motif,documents_consultes,documents_empruntes,observations,visitor_name,visitor_structure,visitor_categorie,visitor_contact,visitor_email,visitor_lien)
+                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(None,str(dv),ha,hd,motif,docs,emprunts,observations,nom_vis,structure_vis,categorie_vis,contact,email,lien))
+            st.success("Visite enregistrée."); st.rerun()
+    visits=df("""SELECT v.id,v.date_visite,COALESCE(v.visitor_name,TRIM(COALESCE(p.nom,'')||' '||COALESCE(p.prenom,''))) AS visiteur,
+                 COALESCE(v.visitor_structure,p.structure) AS structure,COALESCE(v.visitor_categorie,p.categorie) AS categorie,
+                 v.visitor_contact,v.visitor_email,v.visitor_lien,v.heure_arrivee,v.heure_depart,v.motif,v.documents_consultes,v.documents_empruntes,v.observations
                  FROM library_visits v LEFT JOIN people p ON p.id=v.person_id
                  ORDER BY v.date_visite DESC,v.id DESC""")
-    st.dataframe(visits,use_container_width=True,hide_index=True)
-    export_buttons(visits, "visiteurs", "Registre des visiteurs CRA/ISRA")
-    st.metric("Nombre total de visiteurs enregistrés",len(visits))
+    st.subheader("📋 Historique des visites")
+    if visits.empty:
+        st.info("Aucune visite enregistrée pour le moment. Utilisez le formulaire ci-dessus pour créer le premier enregistrement.")
+    else:
+        st.dataframe(visits,use_container_width=True,hide_index=True)
+        export_buttons(visits,"visiteurs","Registre des visiteurs CRA/ISRA")
+        c1,c2=st.columns(2)
+        c1.metric("Nombre total de visites",len(visits))
+        c2.metric("Visiteurs / structures renseignés",visits["structure"].notna().sum() if "structure" in visits.columns else 0)
 
-    # -----------------------------
 def render_researchers():
     st.header("🔬 Valorisation des chercheurs")
     st.caption("Profils chercheurs indépendants de la table Personnes : un chercheur peut être créé ici sans être renseigné dans Documentation.")
@@ -1224,16 +1256,13 @@ def render_researchers():
             email=c1.text_input("E-mail"); telephone=c2.text_input("Téléphone"); orcid=c3.text_input("ORCID")
             bio=st.text_area("Biographie courte")
             profil=st.text_area("Profil scientifique complet",height=150)
-            c1,c2=st.columns(2)
-            lien=c1.text_input("Lien du profil / page chercheur"); photo=c2.file_uploader("Photo",type=["png","jpg","jpeg"],key="researcher_photo")
-            cv=st.file_uploader("CV / profil scientifique",type=["pdf","doc","docx"],key="researcher_cv")
+            lien=st.text_input("🔗 Lien du profil / page chercheur",help="Privilégier un lien stable vers ORCID, Google Scholar, page institutionnelle, laboratoire ou publication.")
             observations=st.text_area("Observations")
             ok=st.form_submit_button("💾 Créer le profil chercheur",type="primary")
         if ok:
             if not nom.strip(): st.error("Le nom du chercheur est obligatoire.")
             else:
-                photo_path=save_uploaded(photo,"chercheurs/photos"); cv_path=save_uploaded(cv,"chercheurs/cv")
-                q("""INSERT INTO researcher_profiles(nom,prenom,grade_fonction,unite_laboratoire,domaine_expertise,mots_cles,biographie,profil_complet,email,telephone,ORCID,photo,cv_fichier,lien_profil,observations) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(nom,prenom,fonction,unite,domaine,mots,bio,profil,email,telephone,orcid,photo_path,cv_path,lien,observations))
+                q("""INSERT INTO researcher_profiles(nom,prenom,grade_fonction,unite_laboratoire,domaine_expertise,mots_cles,biographie,profil_complet,email,telephone,ORCID,lien_profil,observations) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",(nom,prenom,fonction,unite,domaine,mots,bio,profil,email,telephone,orcid,lien,observations))
                 st.success("Profil chercheur créé indépendamment de Documentation."); st.rerun()
         profiles=df("SELECT id,nom,prenom,grade_fonction,unite_laboratoire,domaine_expertise,email,ORCID,lien_profil FROM researcher_profiles ORDER BY nom,prenom")
         st.dataframe(profiles,use_container_width=True,hide_index=True)
@@ -1294,7 +1323,7 @@ def render_scientific_results():
                 titre=c1.text_input("Titre *"); auteurs=c2.text_input("Auteur(s)"); annee=c3.number_input("Année",1900,2100,value=date.today().year)
                 c1,c2,c3=st.columns(3); domaine=c1.text_input("Domaine"); projet=c2.text_input("Projet"); public_cible=c3.text_input("Public cible")
                 resume=st.text_area("Résumé"); mots=c1.text_input("Mots-clés"); reference=c2.text_input("Référence"); lien=c3.text_input("Lien")
-                fichier=st.file_uploader("Fichier",type=["pdf","doc","docx"],key=f"file_{label}"); statut=st.selectbox("Statut",["Disponible","En préparation","Archivé"]); observations=st.text_area("Observations")
+                fichier=None; statut=st.selectbox("Statut",["Disponible","En préparation","Archivé"]); observations=st.text_area("Observations")
                 ok=st.form_submit_button("💾 Enregistrer",type="primary")
             if ok:
                 if not titre.strip(): st.error("Le titre est obligatoire.")
@@ -1314,7 +1343,7 @@ def render_scientific_results():
                     titre=c1.text_input("Titre *"); auteurs=c2.text_input("Auteur(s)"); annee=c3.number_input("Année",1900,2100,value=date.today().year)
                     c1,c2,c3=st.columns(3); domaine=c1.text_input("Domaine"); projet=c2.text_input("Projet"); public_cible=c3.text_input("Public cible")
                     resume=st.text_area("Résumé"); mots=c1.text_input("Mots-clés"); reference=c2.text_input("Référence"); lien=c3.text_input("Lien")
-                    fichier=st.file_uploader("Fichier",type=["pdf","doc","docx"],key=f"pubfile_{ptype}"); statut=st.selectbox("Statut",["Disponible","En préparation","Archivé"]); observations=st.text_area("Observations")
+                    fichier=None; statut=st.selectbox("Statut",["Disponible","En préparation","Archivé"]); observations=st.text_area("Observations")
                     ok=st.form_submit_button("💾 Enregistrer",type="primary")
                 if ok:
                     if not titre.strip(): st.error("Le titre est obligatoire.")
