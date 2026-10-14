@@ -1723,24 +1723,50 @@ def render_dashboard():
 
 def render_activities():
     st.header("➕ Activités")
-    st.caption("Une activité peut se dérouler sur une seule journée ou sur plusieurs jours. La date de fin est conservée séparément.")
+    st.caption("Une activité peut se dérouler sur une seule journée ou sur plusieurs jours. La durée se met à jour automatiquement lorsque vous changez les dates.")
+
+    # Les champs de dates sont volontairement placés hors du formulaire :
+    # Streamlit ne relance pas les formulaires à chaque changement de widget.
+    # Cela permet à la durée de se recalculer immédiatement.
+    start_key = "activity_start_date"
+    end_key = "activity_end_date"
+    multi_key = "activity_multi_days"
+    if start_key not in st.session_state:
+        st.session_state[start_key] = date.today()
+    if multi_key not in st.session_state:
+        st.session_state[multi_key] = False
+    if end_key not in st.session_state:
+        st.session_state[end_key] = st.session_state[start_key]
+
+    # Si la date de début dépasse la date de fin mémorisée, réaligner la fin
+    # avant de créer le widget (évite une erreur de min_value sur les reruns).
+    debut_memorise = st.session_state[start_key]
+    fin_memorisee = st.session_state[end_key]
+    if fin_memorisee < debut_memorise:
+        st.session_state[end_key] = debut_memorise
+
+    c1, c2, c3 = st.columns(3)
+    d = c1.date_input("Date de début", key=start_key)
+    multi_jours = c2.checkbox("Activité sur plusieurs jours", key=multi_key)
+    if multi_jours:
+        # Corriger une éventuelle fin antérieure au début avant d'afficher le champ.
+        if st.session_state[end_key] < d:
+            st.session_state[end_key] = d
+        d_fin = c3.date_input("Date de fin", min_value=d, key=end_key)
+    else:
+        d_fin = d
+        c3.text_input("Durée", value="1 jour", disabled=True, key="activity_duration_single")
+
+    duree_jours = max(1, (d_fin - d).days + 1)
+    if d_fin < d:
+        st.warning("La date de fin doit être égale ou postérieure à la date de début.")
+    st.info(f"🗓️ Durée prévue : **{duree_jours} jour(s)**" + (" (jour de début et jour de fin inclus)" if multi_jours else ""))
+
     with st.form("activity_form"):
         c1, c2, c3 = st.columns(3)
         titre = c1.text_input("Titre *")
         type_a = c2.selectbox("Type", ["Animation scientifique","Atelier","Réunion","Formation","Sensibilisation","Conférence","Séminaire","Forum","Salon","Foire","Journée portes ouvertes","Visite","Mission","Rencontre partenaires","Communication","Documentation","Bibliothèque","Autre"])
         domaine = c3.text_input("Domaine")
-        c1, c2, c3 = st.columns(3)
-        d = c1.date_input("Date de début", date.today(), key="activity_start_date")
-        multi_jours = c2.checkbox("Activité sur plusieurs jours", value=False)
-        if multi_jours:
-            d_fin = c3.date_input("Date de fin", date.today(), min_value=d, key="activity_end_date")
-        else:
-            d_fin = d
-            c3.text_input("Durée", value="1 jour", disabled=True)
-        if d_fin < d:
-            st.warning("La date de fin doit être égale ou postérieure à la date de début.")
-        duree_jours = (d_fin - d).days + 1
-        st.info(f"Durée prévue : **{duree_jours} jour(s)**")
         c1, c2, c3 = st.columns(3)
         hd = c1.text_input("Heure début (facultatif)", placeholder="09:00")
         hf = c2.text_input("Heure fin (facultatif)", placeholder="17:00")
@@ -1756,6 +1782,10 @@ def render_activities():
         observations = st.text_area("Observations")
         submitted = st.form_submit_button("💾 Enregistrer", type="primary")
     if submitted:
+        # Relire les dates depuis l'état courant au moment de l'enregistrement.
+        d = st.session_state[start_key]
+        d_fin = st.session_state[end_key] if st.session_state[multi_key] else d
+        duree_jours = (d_fin - d).days + 1
         if not titre.strip():
             st.error("Le titre est obligatoire.")
         elif d_fin < d:
