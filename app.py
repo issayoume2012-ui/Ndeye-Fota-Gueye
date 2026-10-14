@@ -928,70 +928,130 @@ def _activity_color(index):
 
 
 def _append_activity_pdf_cards(story, frame, body_style, section_style):
-    """Présente chaque activité dans une fiche colorée, avec une teinte pastel propre."""
-    widths = [112, 411]
+    """Fiches colorées par activité ; chaque champ reste regroupé dans un seul bloc."""
+    page_width = 523
+    label_width, value_width = 112, 411
+    metadata_keys = {
+        "date_activite": "Date activité", "date activité": "Date activité", "date": "Date activité",
+        "heure_debut": "Heure début", "heure début": "Heure début", "heure de début": "Heure début",
+        "heure_fin": "Heure fin", "heure fin": "Heure fin", "heure de fin": "Heure fin",
+        "date_fin": "Date fin", "date fin": "Date fin",
+        "duree_jours": "Durée (jours)", "durée (jours)": "Durée (jours)", "duree jours": "Durée (jours)",
+        "statut": "Statut", "created_at": "Créé le", "created at": "Créé le",
+    }
+    metadata_order = ["Date activité", "Date fin", "Durée (jours)", "Heure début", "Heure fin", "Statut", "Créé le"]
+
+    def clean(value):
+        if value is None:
+            return ""
+        result = str(value).strip()
+        return "" if result.lower() in ("nan", "none", "nat") else result
+
+    def nice_date(value):
+        text = clean(value)
+        # Présente les dates ISO dans un format lisible, sans modifier la donnée source.
+        try:
+            if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+                parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+                if "T" in text or " " in text:
+                    return parsed.strftime("%d/%m/%Y %H:%M")
+                return parsed.strftime("%d/%m/%Y")
+        except (ValueError, TypeError):
+            pass
+        return text
+
     for index, (_, row) in enumerate(frame.iterrows(), start=1):
         fill_hex, border_hex, text_hex = _activity_color(index)
-        fill = colors.HexColor(fill_hex)
-        border = colors.HexColor(border_hex)
+        fill, border = colors.HexColor(fill_hex), colors.HexColor(border_hex)
         label_style = ParagraphStyle(
-            f"ActivityFieldLabel{index}", parent=body_style,
-            fontName="Helvetica-Bold", fontSize=7.2, leading=9,
-            textColor=colors.HexColor(text_hex),
+            f"ActivityFieldLabel{index}", parent=body_style, fontName="Helvetica-Bold",
+            fontSize=7.2, leading=9, textColor=colors.HexColor(text_hex),
         )
         activity_style = ParagraphStyle(
-            f"ActivityCardText{index}", parent=body_style,
-            fontSize=7.2, leading=9, textColor=colors.HexColor(text_hex),
-            wordWrap="CJK",
+            f"ActivityCardText{index}", parent=body_style, fontSize=7.2, leading=9,
+            textColor=colors.HexColor(text_hex), wordWrap="CJK",
         )
+        normalized = {str(key).strip().lower().replace("’", "'"): key for key in row.index}
         raw_title = ""
-        for key in row.index:
-            if str(key).strip().lower() in ("titre", "intitulé", "intitule"):
-                value = row[key]
-                raw_title = "" if value is None else str(value).strip()
+        for candidate in ("titre", "intitulé", "intitule"):
+            if candidate in normalized:
+                raw_title = clean(row[normalized[candidate]])
                 break
-        heading = f"Activité {index}" + (f" — {raw_title}" if raw_title and raw_title.lower() != "nan" else "")
+        heading = f"Activité {index}" + (f" — {raw_title}" if raw_title else "")
         heading_style = ParagraphStyle(
-            f"ActivityHeading{index}", parent=section_style,
-            textColor=colors.HexColor(text_hex), fontSize=10, leading=12,
-            spaceBefore=0, spaceAfter=0,
+            f"ActivityHeading{index}", parent=section_style, textColor=colors.HexColor(text_hex),
+            fontSize=10, leading=12, spaceBefore=0, spaceAfter=0,
         )
-        heading_cell = Paragraph(_safe_para_text(heading), heading_style)
-        heading_table = Table([[heading_cell]], colWidths=[523], hAlign="LEFT")
+        heading_table = Table([[Paragraph(_safe_para_text(heading), heading_style)]], colWidths=[page_width], hAlign="LEFT")
         heading_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, -1), fill),
-            ("BOX", (0, 0), (-1, -1), 0.7, border),
-            ("LEFTPADDING", (0, 0), (-1, -1), 7),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 7),
-            ("TOPPADDING", (0, 0), (-1, -1), 5),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("BACKGROUND", (0, 0), (-1, -1), fill), ("BOX", (0, 0), (-1, -1), 0.7, border),
+            ("LEFTPADDING", (0, 0), (-1, -1), 7), ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+            ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ]))
         story.append(Spacer(1, 5))
         story.append(heading_table)
 
-        # Chaque fragment reste dans la même couleur, même si le texte se poursuit
-        # sur plusieurs pages.
+        # Les métadonnées utiles sont regroupées en haut de la fiche, sur une ligne
+        # compacte à plusieurs cellules, plutôt que dispersées dans les descriptions.
+        meta_cells = []
+        for wanted in metadata_order:
+            actual_key = next((key for key in row.index if metadata_keys.get(str(key).strip().lower().replace("’", "'")) == wanted), None)
+            if actual_key is not None:
+                val = clean(row[actual_key])
+                if wanted in ("Date activité", "Date fin", "Créé le"):
+                    val = nice_date(val)
+                if wanted == "Durée (jours)" and val:
+                    val = f"{val} jour(s)"
+                meta_cells.append((wanted, val))
+        if meta_cells:
+            meta_rows = []
+            for offset in range(0, len(meta_cells), 3):
+                triplet = meta_cells[offset:offset + 3]
+                cells = []
+                for label, value in triplet:
+                    cells.append(Paragraph(
+                        f'<font size="6.5"><b>{_safe_para_text(label)}</b></font><br/>'
+                        f'<font size="7.2">{_safe_para_text(value) or "—"}</font>', activity_style
+                    ))
+                while len(cells) < 3:
+                    cells.append(Paragraph("", activity_style))
+                meta_rows.append(cells)
+            meta_table = Table(meta_rows, colWidths=[page_width / 3] * 3, hAlign="LEFT", splitByRow=1)
+            meta_table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), fill), ("BOX", (0, 0), (-1, -1), 0.6, border),
+                ("INNERGRID", (0, 0), (-1, -1), 0.3, border), ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]))
+            story.append(meta_table)
+
+        # Le reste des champs est présenté un champ = un bloc visuel. Si un texte est
+        # long, plusieurs fragments sont placés dans le même tableau avec un libellé
+        # unique : plus de « Observation (suite) », « Description (suite) », etc.
+        top_level_keys = {str(key).strip().lower().replace("’", "'") for key in row.index
+                          if metadata_keys.get(str(key).strip().lower().replace("’", "'")) in metadata_order}
         for column, value in row.items():
-            text_value = "" if value is None else str(value)
-            if text_value.lower() in ("nan", "none", "nat"):
-                text_value = ""
+            normalized_column = str(column).strip().lower().replace("’", "'")
+            if normalized_column in top_level_keys:
+                continue
+            text_value = clean(value)
             chunks = _split_pdf_text(text_value, max_chars=1000)
+            if not chunks:
+                chunks = [""]
+            field_rows = []
             for part_index, chunk in enumerate(chunks):
-                label = str(column) if part_index == 0 else f"{column} (suite)"
-                cell_label = Paragraph(_safe_para_text(label), label_style)
-                cell_value = Paragraph(_safe_para_text(chunk) or "&nbsp;", activity_style)
-                row_table = Table([[cell_label, cell_value]], colWidths=widths, hAlign="LEFT", splitByRow=1, splitInRow=1)
-                row_table.setStyle(TableStyle([
-                    ("BACKGROUND", (0, 0), (-1, -1), fill),
-                    ("BOX", (0, 0), (-1, -1), 0.35, border),
-                    ("INNERGRID", (0, 0), (-1, -1), 0.25, border),
-                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ("LEFTPADDING", (0, 0), (-1, -1), 5),
-                    ("RIGHTPADDING", (0, 0), (-1, -1), 5),
-                    ("TOPPADDING", (0, 0), (-1, -1), 3),
-                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
-                ]))
-                story.append(row_table)
+                field_rows.append([
+                    Paragraph(_safe_para_text(str(column)) if part_index == 0 else "", label_style),
+                    Paragraph(_safe_para_text(chunk) or "&nbsp;", activity_style),
+                ])
+            field_table = Table(field_rows, colWidths=[label_width, value_width], hAlign="LEFT", splitByRow=1, repeatRows=0)
+            field_table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), fill), ("BOX", (0, 0), (-1, -1), 0.45, border),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]))
+            story.append(field_table)
         story.append(Spacer(1, 8))
 
 def pdf_bytes(data, title="Rapport CRA/ISRA"):
