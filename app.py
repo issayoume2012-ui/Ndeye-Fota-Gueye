@@ -1054,6 +1054,138 @@ def _append_activity_pdf_cards(story, frame, body_style, section_style):
             story.append(field_table)
         story.append(Spacer(1, 8))
 
+
+def _append_generic_pdf_cards(story, frame, body_style, section_style, card_prefix="Enregistrement"):
+    """Présente tous les registres en fiches cohérentes, sans répéter les libellés des champs longs."""
+    if frame is None or frame.empty:
+        return
+    page_width = 523
+    label_width, value_width = 112, 411
+    metadata_aliases = {
+        "date_activite": "Date activité", "date activité": "Date activité",
+        "date_publication": "Date publication", "date_intervention": "Date intervention",
+        "date_production": "Date production", "date_visite": "Date visite",
+        "date_debut": "Date début", "date_fin": "Date fin", "date fin": "Date fin",
+        "date": "Date", "heure_debut": "Heure début", "heure_debut": "Heure début",
+        "heure_fin": "Heure fin", "heure fin": "Heure fin", "duree_jours": "Durée (jours)",
+        "durée (jours)": "Durée (jours)", "statut": "Statut", "created_at": "Créé le",
+        "created at": "Créé le", "updated_at": "Mis à jour le", "updated at": "Mis à jour le",
+    }
+    metadata_order = ["Date activité", "Date", "Date publication", "Date intervention", "Date production",
+                      "Date visite", "Date début", "Date fin", "Durée (jours)", "Heure début", "Heure fin",
+                      "Statut", "Créé le", "Mis à jour le"]
+
+    def clean(value):
+        if value is None:
+            return ""
+        value = str(value).strip()
+        return "" if value.lower() in ("nan", "none", "nat") else value
+
+    def pretty_date(value):
+        value = clean(value)
+        try:
+            if len(value) >= 10 and value[4] == "-" and value[7] == "-":
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                return parsed.strftime("%d/%m/%Y %H:%M" if ("T" in value or " " in value) else "%d/%m/%Y")
+        except (ValueError, TypeError):
+            pass
+        return value
+
+    for index, (_, row) in enumerate(frame.iterrows(), start=1):
+        fill_hex, border_hex, text_hex = _activity_color(index)
+        fill, border = colors.HexColor(fill_hex), colors.HexColor(border_hex)
+        label_style = ParagraphStyle(
+            f"GenericCardLabel{index}", parent=body_style, fontName="Helvetica-Bold",
+            fontSize=7.2, leading=9, textColor=colors.HexColor(text_hex),
+        )
+        value_style = ParagraphStyle(
+            f"GenericCardValue{index}", parent=body_style, fontSize=7.2, leading=9,
+            textColor=colors.HexColor(text_hex), wordWrap="CJK",
+        )
+        normalized = {str(key).strip().lower().replace("’", "'"): key for key in row.index}
+        heading_value = ""
+        for candidate in ("titre", "intitulé", "intitule", "nom", "nom_document", "nom document", "objet", "sujet", "libelle", "libellé"):
+            if candidate in normalized:
+                heading_value = clean(row[normalized[candidate]])
+                if heading_value:
+                    break
+        heading_text = f"{card_prefix} {index}" + (f" — {heading_value}" if heading_value else "")
+        heading_style = ParagraphStyle(
+            f"GenericCardHeading{index}", parent=section_style, fontSize=10, leading=12,
+            textColor=colors.HexColor(text_hex), spaceBefore=0, spaceAfter=0,
+        )
+        heading = Table([[Paragraph(_safe_para_text(heading_text), heading_style)]], colWidths=[page_width], hAlign="LEFT")
+        heading.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), fill), ("BOX", (0, 0), (-1, -1), 0.7, border),
+            ("LEFTPADDING", (0, 0), (-1, -1), 7), ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+            ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ]))
+        story.append(Spacer(1, 5))
+        story.append(heading)
+
+        meta_cells = []
+        for wanted in metadata_order:
+            actual = next((key for key in row.index if metadata_aliases.get(str(key).strip().lower().replace("’", "'")) == wanted), None)
+            if actual is not None:
+                val = clean(row[actual])
+                if wanted.startswith("Date") or wanted in ("Créé le", "Mis à jour le"):
+                    val = pretty_date(val)
+                if wanted == "Durée (jours)" and val:
+                    val = f"{val} jour(s)"
+                if val:
+                    meta_cells.append((wanted, val))
+        if meta_cells:
+            meta_rows = []
+            for offset in range(0, len(meta_cells), 3):
+                group = meta_cells[offset:offset + 3]
+                cells = [Paragraph(
+                    f'<font size="6.5"><b>{_safe_para_text(label)}</b></font><br/>'
+                    f'<font size="7.2">{_safe_para_text(value)}</font>', value_style
+                ) for label, value in group]
+                while len(cells) < 3:
+                    cells.append(Paragraph("", value_style))
+                meta_rows.append(cells)
+            meta = Table(meta_rows, colWidths=[page_width / 3] * 3, hAlign="LEFT", splitByRow=1)
+            meta.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), fill), ("BOX", (0, 0), (-1, -1), 0.6, border),
+                ("INNERGRID", (0, 0), (-1, -1), 0.3, border), ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 6), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ]))
+            story.append(meta)
+
+        metadata_columns = {str(key).strip().lower().replace("’", "'") for key in row.index
+                            if str(key).strip().lower().replace("’", "'") in metadata_aliases}
+        for column, value in row.items():
+            norm = str(column).strip().lower().replace("’", "'")
+            if norm in metadata_columns:
+                continue
+            chunks = _split_pdf_text(clean(value), max_chars=950)
+            field_rows = []
+            for part_index, chunk in enumerate(chunks or [""]):
+                field_rows.append([
+                    Paragraph(_safe_para_text(str(column)) if part_index == 0 else "", label_style),
+                    Paragraph(_safe_para_text(chunk) or "&nbsp;", value_style),
+                ])
+            field_table = Table(field_rows, colWidths=[label_width, value_width], hAlign="LEFT", splitByRow=1)
+            field_table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), fill), ("BOX", (0, 0), (-1, -1), 0.45, border),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ]))
+            story.append(field_table)
+        story.append(Spacer(1, 8))
+
+
+def _append_pdf_dataset(story, frame, body_style, head_style, section_style, card_prefix="Enregistrement"):
+    """Rendu commun aux exports PDF individuels et au rapport complet."""
+    if frame is None or frame.empty:
+        return
+    # Une seule présentation pour tous les registres : les libellés de champs longs
+    # restent uniques et toutes les valeurs sont conservées dans la fiche correspondante.
+    _append_generic_pdf_cards(story, frame, body_style, section_style, card_prefix=card_prefix)
+
 def pdf_bytes(data, title="Rapport CRA/ISRA"):
     """Génère un PDF robuste : pages découpées, colonnes paginées et repli sécurisé."""
     if not REPORTLAB_AVAILABLE:
@@ -1120,33 +1252,12 @@ def pdf_bytes(data, title="Rapport CRA/ISRA"):
                 "pour la distinguer des autres activités. La palette se répète après dix couleurs.", subtitle
             ))
             _append_activity_pdf_cards(story, frame, body, section)
-        elif max_cell_length > 3000:
-            story.append(Paragraph(
-                "Présentation détaillée activée automatiquement pour préserver "
-                "l'intégralité des textes longs.", subtitle
-            ))
-            for row_number, (_, row) in enumerate(frame.iterrows(), start=1):
-                story.append(Paragraph(f"Enregistrement {row_number}", section))
-                for column, value in row.items():
-                    _append_long_pdf_text(story, f"{column} :", value, body)
-                story.append(Spacer(1, 8))
         else:
-            column_group_size = 5
-            column_groups = [frame.iloc[:, i:i + column_group_size]
-                             for i in range(0, len(frame.columns), column_group_size)]
-            if not column_groups:
-                column_groups = [frame]
-            for group_index, group in enumerate(column_groups, start=1):
-                if group_index > 1:
-                    story.append(PageBreak())
-                    story.append(Paragraph(
-                        f"Suite des données — groupe de colonnes {group_index}/{len(column_groups)}",
-                        section,
-                    ))
-                table = _pdf_table(group, body, head, usable_width=523, max_rows=None)
-                if table is not None:
-                    story.append(table)
-                # Le PDF garde toutes les lignes; le découpage est confié à ReportLab.
+            story.append(Paragraph(
+                "Les enregistrements sont présentés séparément. Les champs longs restent regroupés "
+                "sous un seul intitulé et peuvent se poursuivre sur plusieurs lignes ou pages.", subtitle
+            ))
+            _append_generic_pdf_cards(story, frame, body, section, card_prefix="Enregistrement")
 
     try:
         doc.build(story, onFirstPage=_pdf_header_footer, onLaterPages=_pdf_header_footer)
@@ -1175,16 +1286,9 @@ def pdf_bytes(data, title="Rapport CRA/ISRA"):
             if _is_activity_dataset(fallback_frame, title):
                 _append_activity_pdf_cards(fallback_story, fallback_frame, body, section)
             else:
-                for row_number, (_, row) in enumerate(fallback_frame.iterrows(), start=1):
-                    fallback_story.append(Paragraph(f"Enregistrement {row_number}", section))
-                    for column, value in row.items():
-                        # Les textes sont découpés en fragments indépendants. Aucune limite
-                        # de longueur n'est appliquée : un champ de 100 pages ou davantage
-                        # est réparti sur autant de pages que nécessaire, sans troncature.
-                        _append_long_pdf_text(
-                            fallback_story, f"{column} :", value, body
-                        )
-                    fallback_story.append(Spacer(1, 8))
+                _append_generic_pdf_cards(
+                    fallback_story, fallback_frame, body, section, card_prefix="Enregistrement"
+                )
         try:
             fallback_doc.build(
                 fallback_story, onFirstPage=_pdf_header_footer, onLaterPages=_pdf_header_footer
@@ -1525,10 +1629,14 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     # Vues PDF lisibles : les DataFrames originaux restent inchangés pour l'Excel.
     activities_pdf = _pdf_report_view(
         report_data.get("Activités"),
-        ["id", "date_activite", "titre", "type_activite", "description", "lieu", "responsable", "statut", "observations"],
-        {"id":"ID", "date_activite":"Date", "titre":"Activité", "type_activite":"Type",
-         "description":"Description", "lieu":"Lieu", "responsable":"Responsable",
-         "statut":"Statut", "observations":"Observations"},
+        ["id", "date_activite", "date_fin", "duree_jours", "heure_debut", "heure_fin", "created_at",
+         "titre", "type_activite", "objectifs", "description", "heures", "resultats_attendus",
+         "lieu", "responsable", "statut", "observations"],
+        {"id":"ID", "date_activite":"Date activité", "date_fin":"Date fin", "duree_jours":"Durée (jours)",
+         "heure_debut":"Heure début", "heure_fin":"Heure fin", "created_at":"Créé le",
+         "titre":"Activité", "type_activite":"Type", "objectifs":"Objectifs",
+         "description":"Description", "heures":"Heures", "resultats_attendus":"Résultats attendus",
+         "lieu":"Lieu", "responsable":"Responsable", "statut":"Statut", "observations":"Observations"},
     )
     communication_pdf = _pdf_report_view(
         report_data.get("Communication"),
@@ -1573,7 +1681,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
         if frame is None or frame.empty:
             story.append(Paragraph("Aucune donnée renseignée pour cette rubrique.", body))
         else:
-            story.append(_pdf_table(frame, body, head))
+            _append_pdf_dataset(story, frame, body, head, subsection, card_prefix=title)
         story.append(Spacer(1, 6))
 
     story.append(PageBreak())
@@ -1606,7 +1714,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
         if frame is None or frame.empty:
             story.append(Paragraph("Aucune donnée renseignée pour cette rubrique.", body))
         else:
-            story.append(_pdf_table(frame, body, head))
+            _append_pdf_dataset(story, frame, body, head, subsection, card_prefix=title)
         story.append(Spacer(1, 6))
 
     story.append(PageBreak())
@@ -1635,7 +1743,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
         if frame is None or frame.empty:
             story.append(Paragraph("Aucune donnée renseignée pour cette rubrique.", body))
         else:
-            story.append(_pdf_table(frame, body, head))
+            _append_pdf_dataset(story, frame, body, head, subsection, card_prefix=title)
         story.append(Spacer(1, 6))
 
     story.append(PageBreak())
@@ -1653,7 +1761,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     if visitors is None or visitors.empty:
         story.append(Paragraph("Aucune visite renseignée pour cette période.", body))
     else:
-        story.append(_pdf_table(visitors, body, head))
+        _append_pdf_dataset(story, visitors, body, head, subsection, card_prefix="Visiteur")
 
     story.append(PageBreak())
 
@@ -1677,7 +1785,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
         if frame is None or frame.empty:
             story.append(Paragraph("Aucune donnée renseignée pour cette rubrique.", body))
         else:
-            story.append(_pdf_table(frame, body, head))
+            _append_pdf_dataset(story, frame, body, head, subsection, card_prefix=title)
         story.append(Spacer(1, 6))
 
     story.append(PageBreak())
