@@ -558,6 +558,8 @@ def init_db():
             observations TEXT,
             created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
+        ALTER TABLE activities ADD COLUMN IF NOT EXISTS date_fin DATE;
+        UPDATE activities SET date_fin = date_activite WHERE date_fin IS NULL AND date_activite IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_activities_date ON activities(date_activite);
         CREATE INDEX IF NOT EXISTS idx_documents_year ON documents(annee);
         CREATE INDEX IF NOT EXISTS idx_loans_status ON loans(statut);
@@ -759,7 +761,7 @@ def _safe_para(value, style):
     return Paragraph(value, style)
 
 
-def _pdf_table(data, body_style, head_style, usable_width=523, max_rows=250):
+def _pdf_table(data, body_style, head_style, usable_width=523, max_rows=None):
     """
     Tableau PDF robuste :
     - conserve les données ;
@@ -779,7 +781,7 @@ def _pdf_table(data, body_style, head_style, usable_width=523, max_rows=250):
 
     table_data = [[_safe_para(c, head_style) for c in headers]]
 
-    limited = d.head(max_rows)
+    limited = d if max_rows is None else d.head(max_rows)
     for row in limited.astype(str).values.tolist():
         table_data.append([_safe_para(v, body_style) for v in row])
 
@@ -801,6 +803,7 @@ def _pdf_table(data, body_style, head_style, usable_width=523, max_rows=250):
         repeatRows=1,
         hAlign="LEFT",
         splitByRow=1,
+        splitInRow=1,
     )
     tbl.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#062A49")),
@@ -893,84 +896,122 @@ def _pdf_kpi_table(kpis, body_style):
 
 
 def pdf_bytes(data, title="Rapport CRA/ISRA"):
-    """PDF individuel premium conservant les exports existants."""
+    """Génère un PDF robuste : pages découpées, colonnes paginées et repli sécurisé."""
     if not REPORTLAB_AVAILABLE:
         return None
 
     bio = io.BytesIO()
     doc = SimpleDocTemplate(
-        bio,
-        pagesize=A4,
-        rightMargin=34,
-        leftMargin=34,
-        topMargin=82,
-        bottomMargin=42,
-        title=title,
-        author="CRA/ISRA",
+        bio, pagesize=A4, rightMargin=34, leftMargin=34,
+        topMargin=82, bottomMargin=42, title=str(title)[:200], author="CRA/ISRA",
     )
 
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle(
-        "BrandTitle",
-        parent=styles["Title"],
-        alignment=TA_LEFT,
-        fontSize=20,
-        leading=24,
-        textColor=colors.HexColor("#083B66"),
-        spaceAfter=7,
+        "BrandTitle", parent=styles["Title"], alignment=TA_LEFT,
+        fontSize=20, leading=24, textColor=colors.HexColor("#083B66"), spaceAfter=7,
     )
     subtitle = ParagraphStyle(
-        "Subtitle",
-        parent=styles["BodyText"],
-        fontSize=8.5,
-        leading=12,
-        textColor=colors.HexColor("#64748B"),
-        spaceAfter=12,
+        "Subtitle", parent=styles["BodyText"], fontSize=8.5, leading=12,
+        textColor=colors.HexColor("#64748B"), spaceAfter=12,
     )
     body = ParagraphStyle(
-        "PDFBody",
-        parent=styles["BodyText"],
-        fontSize=8,
-        leading=10,
-        textColor=colors.HexColor("#1E293B"),
+        "PDFBody", parent=styles["BodyText"], fontSize=7.5, leading=9,
+        textColor=colors.HexColor("#1E293B"), wordWrap="CJK",
     )
     head = ParagraphStyle(
-        "PDFHead",
-        parent=body,
-        textColor=colors.white,
-        fontName="Helvetica-Bold",
-        fontSize=6.6,
-        leading=7.5,
+        "PDFHead", parent=body, textColor=colors.white,
+        fontName="Helvetica-Bold", fontSize=6.5, leading=7.2, wordWrap="CJK",
     )
     section = ParagraphStyle(
-        "Section",
-        parent=styles["Heading2"],
-        fontSize=12,
-        leading=15,
-        textColor=colors.HexColor("#0B74B8"),
-        spaceBefore=8,
-        spaceAfter=7,
+        "Section", parent=styles["Heading2"], fontSize=12, leading=15,
+        textColor=colors.HexColor("#0B74B8"), spaceBefore=8, spaceAfter=7,
     )
 
     story = [
         Paragraph("RAPPORT • CRA / ISRA", title_style),
-        Paragraph(title, section),
+        Paragraph(_safe_para_text(title), section),
         Paragraph(
-            f"<b>Ndeye Fota Gueye</b> — Chargée de la communication et documentation de CRA/ISRA Saint-Louis"
-            f"<br/>Généré le {datetime.now().strftime('%d/%m/%Y à %H:%M')}",
-            subtitle,
+            "<b>CRA/ISRA Saint-Louis</b> — Registre interne IST et Communication"
+            f"<br/>Généré le {datetime.now().strftime('%d/%m/%Y à %H:%M')}", subtitle,
         ),
     ]
 
     if data is None or data.empty:
         story.append(Paragraph("Aucune donnée à afficher.", body))
     else:
-        table = _pdf_table(data, body, head)
-        if table is not None:
-            story.append(table)
+        # Les tables extrêmement larges sont séparées en groupes de colonnes afin
+        # d'éviter les largeurs nulles et les LayoutError sur les pages A4.
+        frame = data.copy().fillna("")
+        column_group_size = 5
+        column_groups = [frame.iloc[:, i:i + column_group_size]
+                         for i in range(0, len(frame.columns), column_group_size)]
+        if not column_groups:
+            column_groups = [frame]
+        for group_index, group in enumerate(column_groups, start=1):
+            if group_index > 1:
+                story.append(PageBreak())
+                story.append(Paragraph(
+                    f"Suite des données — groupe de colonnes {group_index}/{len(column_groups)}",
+                    section,
+                ))
+            table = _pdf_table(group, body, head, usable_width=523, max_rows=None)
+            if table is not None:
+                story.append(table)
+            # Le PDF garde toutes les lignes; le découpage est confié à ReportLab.
 
-    doc.build(story, onFirstPage=_pdf_header_footer, onLaterPages=_pdf_header_footer)
-    return bio.getvalue()
+    try:
+        doc.build(story, onFirstPage=_pdf_header_footer, onLaterPages=_pdf_header_footer)
+        return bio.getvalue()
+    except Exception as first_error:
+        # Deuxième passe : rapport linéaire sans tableau. Elle protège l'application
+        # si une cellule atypique empêche malgré tout ReportLab de découper une table.
+        bio = io.BytesIO()
+        fallback_doc = SimpleDocTemplate(
+            bio, pagesize=A4, rightMargin=34, leftMargin=34,
+            topMargin=82, bottomMargin=42, title=str(title)[:200], author="CRA/ISRA",
+        )
+        fallback_story = [
+            Paragraph("RAPPORT • CRA / ISRA", title_style),
+            Paragraph(_safe_para_text(title), section),
+            Paragraph(
+                f"Export de secours généré le {datetime.now().strftime('%d/%m/%Y à %H:%M')}. "
+                "Le format tabulaire a été remplacé par une présentation détaillée pour assurer la lecture.",
+                subtitle,
+            ),
+        ]
+        if data is None or data.empty:
+            fallback_story.append(Paragraph("Aucune donnée à afficher.", body))
+        else:
+            for row_number, (_, row) in enumerate(data.fillna("").iterrows(), start=1):
+                fallback_story.append(Paragraph(f"Enregistrement {row_number}", section))
+                for column, value in row.items():
+                    label = _safe_para_text(column)
+                    value_text = _safe_para_text(value)
+                    # Un paragraphe distinct par champ autorise le passage à la page suivante.
+                    fallback_story.append(Paragraph(f"<b>{label} :</b> {value_text}", body))
+                    fallback_story.append(Spacer(1, 3))
+                fallback_story.append(Spacer(1, 8))
+        try:
+            fallback_doc.build(
+                fallback_story, onFirstPage=_pdf_header_footer, onLaterPages=_pdf_header_footer
+            )
+            return bio.getvalue()
+        except Exception as fallback_error:
+            # L'erreur est remontée à export_buttons, qui ne doit pas faire planter la page.
+            raise RuntimeError(
+                f"Export PDF impossible même en mode de secours ({type(fallback_error).__name__})."
+            ) from first_error
+
+
+def _safe_para_text(value):
+    """Échappe le texte utilisateur pour qu'il ne soit pas interprété comme du balisage XML."""
+    if value is None:
+        return ""
+    text_value = str(value)
+    return (text_value.replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace("\r\n", "<br/>")
+            .replace("\n", "<br/>").replace("\r", "<br/>"))
 
 
 def _pdf_report_view(frame, columns, labels=None):
@@ -1461,14 +1502,133 @@ def export_buttons(data, base_name, title):
             key=f"xlsx_{base_name}"
         )
     with c3:
-        pdf = pdf_bytes(data, title)
-        if pdf is not None:
-            st.download_button(
-                "⬇️ PDF", pdf, f"{base_name}.pdf",
-                "application/pdf", key=f"pdf_{base_name}"
-            )
-        else:
+        if not REPORTLAB_AVAILABLE:
             st.caption("PDF indisponible : installez reportlab.")
+        else:
+            try:
+                pdf = pdf_bytes(data, title)
+                if pdf:
+                    st.download_button(
+                        "⬇️ PDF", pdf, f"{base_name}.pdf",
+                        "application/pdf", key=f"pdf_{base_name}"
+                    )
+                else:
+                    st.caption("Le PDF n'a pas pu être généré. Les exports CSV et Excel restent disponibles.")
+            except Exception as exc:
+                # Un défaut de mise en page PDF ne doit jamais interrompre l'application.
+                st.warning(
+                    "L'export PDF a rencontré un problème de mise en page. "
+                    "Les exports CSV et Excel restent disponibles. "
+                    f"Détail technique : {type(exc).__name__}."
+                )
+
+# -----------------------------
+# MODIFICATION / SUPPRESSION TRANSVERSALE DES ENREGISTREMENTS
+# -----------------------------
+CRUD_TABLES_BY_PAGE = {
+    "📣 Communication": {
+        "Activités": "activities", "Actions de communication": "communications",
+        "Presse et médias": "media", "Audiovisuel": "audiovisual",
+        "Formats de communication": "communication_formats",
+    },
+    "📚 Documentations": {
+        "Catalogue bibliothèque": "library_items", "Documentation IST": "documents",
+        "Personnes": "people", "Consultations": "consultations", "Prêts et retours": "loans",
+    },
+    "👥 Visiteurs": {"Registre des visiteurs": "library_visits"},
+    "🔬 Résultat scientifique": {
+        "Résultats scientifiques": "scientific_results", "Publications scientifiques": "scientific_publications",
+    },
+    "🧬 Valorisation chercheurs": {
+        "Profils chercheurs": "researcher_profiles", "Actions de valorisation": "researcher_valorization",
+    },
+}
+
+
+def render_record_manager(current_page):
+    """Éditeur générique sécurisé par liste blanche, permettant modifier/supprimer les lignes existantes."""
+    tables = CRUD_TABLES_BY_PAGE.get(current_page, {})
+    if not tables:
+        return
+    with st.expander("🛠️ Modifier ou supprimer un enregistrement existant", expanded=False):
+        st.caption("Choisissez une rubrique et un identifiant. Les modifications sont enregistrées directement dans PostgreSQL/Supabase.")
+        label = st.selectbox("Rubrique à gérer", list(tables), key=f"crud_table_{current_page}")
+        table = tables[label]
+        records = df(f'SELECT * FROM "{table}" ORDER BY id DESC LIMIT 500')
+        if records.empty:
+            st.info("Aucun enregistrement disponible dans cette rubrique.")
+            return
+        st.dataframe(records, use_container_width=True, hide_index=True)
+        ids = records["id"].tolist()
+        selected_id = st.selectbox("Enregistrement à modifier", ids, format_func=lambda x: f"ID {x} — " + str(records.loc[records.id == x].iloc[0].get("titre", records.loc[records.id == x].iloc[0].get("nom", records.loc[records.id == x].iloc[0].get("media_name", "Enregistrement")))), key=f"crud_id_{current_page}_{table}")
+        row = q(f'SELECT * FROM "{table}" WHERE id=?', (selected_id,), fetch=True)
+        if not row:
+            st.warning("Cet enregistrement n'existe plus.")
+            return
+        values = row[0]
+        with st.form(f"crud_edit_form_{current_page}_{table}_{selected_id}"):
+            edited = {}
+            cols = st.columns(2)
+            editable = [c for c in values if c not in ("id", "created_at")]
+            for i, col in enumerate(editable):
+                value = values[col]
+                target = cols[i % 2]
+                if isinstance(value, bool):
+                    edited[col] = target.checkbox(col.replace("_", " ").capitalize(), value=value, key=f"crud_{table}_{selected_id}_{col}")
+                elif isinstance(value, (date, datetime)) or (value is not None and col in {"date_activite", "date_fin", "date_publication", "date_intervention", "date_production", "date_visite", "date_consultation", "date_emprunt", "date_retour_prevue", "date_retour_reelle", "date_action"}):
+                    try:
+                        dv = value.date() if isinstance(value, datetime) else value
+                        if not isinstance(dv, date): dv = date.fromisoformat(str(dv)[:10])
+                        edited[col] = target.date_input(col.replace("_", " ").capitalize(), value=dv, key=f"crud_{table}_{selected_id}_{col}")
+                    except Exception:
+                        edited[col] = target.text_input(col.replace("_", " ").capitalize(), value="" if value is None else str(value), key=f"crud_{table}_{selected_id}_{col}")
+                elif isinstance(value, int) and not isinstance(value, bool):
+                    edited[col] = target.number_input(col.replace("_", " ").capitalize(), value=int(value), step=1, key=f"crud_{table}_{selected_id}_{col}")
+                elif isinstance(value, float):
+                    edited[col] = target.number_input(col.replace("_", " ").capitalize(), value=float(value), key=f"crud_{table}_{selected_id}_{col}")
+                else:
+                    text_value = "" if value is None else str(value)
+                    if len(text_value) > 90 or "resume" in col or "description" in col or "observation" in col or "biographie" in col or "objectif" in col or "resultat" in col or "profil_complet" in col or "documents_" in col:
+                        edited[col] = target.text_area(col.replace("_", " ").capitalize(), value=text_value, key=f"crud_{table}_{selected_id}_{col}", height=100)
+                    else:
+                        edited[col] = target.text_input(col.replace("_", " ").capitalize(), value=text_value, key=f"crud_{table}_{selected_id}_{col}")
+            save_col, delete_col = st.columns(2)
+            save = save_col.form_submit_button("💾 Enregistrer les modifications", type="primary", use_container_width=True)
+            delete = delete_col.form_submit_button("🗑️ Supprimer cet enregistrement", use_container_width=True)
+        if save:
+            if table == "activities" and edited.get("date_activite") and edited.get("date_fin") and edited["date_fin"] < edited["date_activite"]:
+                st.error("La date de fin doit être égale ou postérieure à la date de début.")
+                return
+            assignments = ", ".join(f'"{col}"=?' for col in edited)
+            params = []
+            nullable_numeric = {"activity_id", "person_id", "item_id", "valorization_id", "researcher_id", "annee", "pages", "vues", "reactions", "commentaires", "partages", "telechargements", "exemplaires", "disponibles", "duree_jours"}
+            nullable_dates = {"date_activite", "date_fin", "date_publication", "date_intervention", "date_production", "date_visite", "date_consultation", "date_emprunt", "date_retour_prevue", "date_retour_reelle", "date_action"}
+            for col, value in edited.items():
+                if isinstance(value, (date, datetime)):
+                    value = value.isoformat()
+                elif isinstance(value, str) and not value.strip() and col in nullable_numeric | nullable_dates:
+                    value = None
+                elif isinstance(value, str) and not value.strip() and col.endswith("_id"):
+                    value = None
+                params.append(value)
+            params.append(selected_id)
+            q(f'UPDATE "{table}" SET {assignments} WHERE id=?', tuple(params))
+            st.success("Modifications enregistrées.")
+            st.rerun()
+        if delete:
+            st.session_state[f"confirm_delete_{table}_{selected_id}"] = True
+        if st.session_state.get(f"confirm_delete_{table}_{selected_id}"):
+            st.warning(f"Confirmez-vous la suppression de l'enregistrement ID {selected_id} ? Cette action peut être irréversible.")
+            yes, no = st.columns(2)
+            if yes.button("Oui, supprimer définitivement", key=f"confirm_yes_{table}_{selected_id}", type="primary"):
+                q(f'DELETE FROM "{table}" WHERE id=?', (selected_id,))
+                st.session_state.pop(f"confirm_delete_{table}_{selected_id}", None)
+                st.success("Enregistrement supprimé.")
+                st.rerun()
+            if no.button("Annuler", key=f"confirm_no_{table}_{selected_id}"):
+                st.session_state.pop(f"confirm_delete_{table}_{selected_id}", None)
+                st.rerun()
+
 
 # -----------------------------
 # HEADER / NAVIGATION XXL — IST ET COMMUNICATION
@@ -1563,20 +1723,32 @@ def render_dashboard():
 
 def render_activities():
     st.header("➕ Activités")
+    st.caption("Une activité peut se dérouler sur une seule journée ou sur plusieurs jours. La date de fin est conservée séparément.")
     with st.form("activity_form"):
         c1, c2, c3 = st.columns(3)
         titre = c1.text_input("Titre *")
         type_a = c2.selectbox("Type", ["Animation scientifique","Atelier","Réunion","Formation","Sensibilisation","Conférence","Séminaire","Forum","Salon","Foire","Journée portes ouvertes","Visite","Mission","Rencontre partenaires","Communication","Documentation","Bibliothèque","Autre"])
         domaine = c3.text_input("Domaine")
         c1, c2, c3 = st.columns(3)
-        d = c1.date_input("Date", date.today())
-        hd = c2.text_input("Heure début")
-        hf = c3.text_input("Heure fin")
+        d = c1.date_input("Date de début", date.today(), key="activity_start_date")
+        multi_jours = c2.checkbox("Activité sur plusieurs jours", value=False)
+        if multi_jours:
+            d_fin = c3.date_input("Date de fin", date.today(), min_value=d, key="activity_end_date")
+        else:
+            d_fin = d
+            c3.text_input("Durée", value="1 jour", disabled=True)
+        if d_fin < d:
+            st.warning("La date de fin doit être égale ou postérieure à la date de début.")
+        duree_jours = (d_fin - d).days + 1
+        st.info(f"Durée prévue : **{duree_jours} jour(s)**")
         c1, c2, c3 = st.columns(3)
-        lieu = c1.text_input("Lieu")
-        region = c2.text_input("Région")
-        localite = c3.text_input("Localité")
-        responsable = st.text_input("Responsable")
+        hd = c1.text_input("Heure début (facultatif)", placeholder="09:00")
+        hf = c2.text_input("Heure fin (facultatif)", placeholder="17:00")
+        lieu = c3.text_input("Lieu")
+        c1, c2, c3 = st.columns(3)
+        region = c1.text_input("Région")
+        localite = c2.text_input("Localité")
+        responsable = c3.text_input("Responsable")
         statut = st.selectbox("Statut", ["Prévue","En préparation","Réalisée","Reportée","Annulée"])
         objectifs = st.text_area("Objectifs")
         description = st.text_area("Description")
@@ -1586,18 +1758,23 @@ def render_activities():
     if submitted:
         if not titre.strip():
             st.error("Le titre est obligatoire.")
+        elif d_fin < d:
+            st.error("La date de fin ne peut pas précéder la date de début.")
         else:
             ref = f"ACT-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
-            q("""INSERT INTO activities(reference,titre,type_activite,domaine,date_activite,heure_debut,heure_fin,
+            q("""INSERT INTO activities(reference,titre,type_activite,domaine,date_activite,date_fin,heure_debut,heure_fin,
                  lieu,region,localite,responsable,description,objectifs,resultats,observations,statut)
-                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-              (ref,titre,type_a,domaine,str(d),hd,hf,lieu,region,localite,responsable,description,objectifs,resultats,observations,statut))
-            st.success(f"Activité enregistrée : {ref}")
+                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+              (ref,titre,type_a,domaine,str(d),str(d_fin),hd,hf,lieu,region,localite,responsable,description,objectifs,resultats,observations,statut))
+            st.success(f"Activité enregistrée : {ref} — du {d.strftime('%d/%m/%Y')} au {d_fin.strftime('%d/%m/%Y')} ({duree_jours} jour(s)).")
             st.rerun()
     st.divider()
     st.subheader("Activités enregistrées")
-    data = df("SELECT * FROM activities ORDER BY date_activite DESC, id DESC")
-    st.dataframe(data, use_container_width=True, hide_index=True)
+    data = df("SELECT *, (date_fin - date_activite + 1) AS duree_jours FROM activities ORDER BY date_activite DESC, id DESC")
+    if not data.empty:
+        st.dataframe(data, use_container_width=True, hide_index=True)
+    else:
+        st.info("Aucune activité enregistrée.")
     export_buttons(data, "activites", "Activités CRA/ISRA")
 
 
@@ -2353,14 +2530,19 @@ if page == "🏠 Tableau de bord":
     render_dashboard()
 elif page == "📣 Communication":
     render_communication()
+    render_record_manager(page)
 elif page == "📚 Documentations":
     render_documentations()
+    render_record_manager(page)
 elif page == "🔬 Résultat scientifique":
     render_scientific_results()
+    render_record_manager(page)
 elif page == "👥 Visiteurs":
     render_visitors()
+    render_record_manager(page)
 elif page == "🧬 Valorisation chercheurs":
     render_researchers()
+    render_record_manager(page)
 elif page == "👤 Profil":
     render_profile()
 elif page == "📊 Rapports & exports":
