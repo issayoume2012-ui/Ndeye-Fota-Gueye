@@ -940,25 +940,48 @@ def pdf_bytes(data, title="Rapport CRA/ISRA"):
     if data is None or data.empty:
         story.append(Paragraph("Aucune donnée à afficher.", body))
     else:
-        # Les tables extrêmement larges sont séparées en groupes de colonnes afin
-        # d'éviter les largeurs nulles et les LayoutError sur les pages A4.
+        # Les tables extrêmement larges sont séparées en groupes de colonnes.
+        # Pour les textes longs, on évite complètement le tableau : même si ReportLab
+        # sait découper certaines lignes, le calcul d'une cellule gigantesque peut
+        # lui-même provoquer un LayoutError ou ralentir fortement la génération.
         frame = data.copy().fillna("")
-        column_group_size = 5
-        column_groups = [frame.iloc[:, i:i + column_group_size]
-                         for i in range(0, len(frame.columns), column_group_size)]
-        if not column_groups:
-            column_groups = [frame]
-        for group_index, group in enumerate(column_groups, start=1):
-            if group_index > 1:
-                story.append(PageBreak())
-                story.append(Paragraph(
-                    f"Suite des données — groupe de colonnes {group_index}/{len(column_groups)}",
-                    section,
-                ))
-            table = _pdf_table(group, body, head, usable_width=523, max_rows=None)
-            if table is not None:
-                story.append(table)
-            # Le PDF garde toutes les lignes; le découpage est confié à ReportLab.
+        max_cell_length = 0
+        if not frame.empty:
+            try:
+                max_cell_length = max(
+                    len(str(value))
+                    for value in frame.astype(str).to_numpy().ravel()
+                )
+            except (TypeError, ValueError):
+                max_cell_length = 0
+
+        if max_cell_length > 3000:
+            story.append(Paragraph(
+                "Présentation détaillée activée automatiquement pour préserver "
+                "l'intégralité des textes longs.", subtitle
+            ))
+            for row_number, (_, row) in enumerate(frame.iterrows(), start=1):
+                story.append(Paragraph(f"Enregistrement {row_number}", section))
+                for column, value in row.items():
+                    _append_long_pdf_text(story, f"{column} :", value, body)
+                story.append(Spacer(1, 8))
+        else:
+            column_group_size = 5
+            column_groups = [frame.iloc[:, i:i + column_group_size]
+                             for i in range(0, len(frame.columns), column_group_size)]
+            if not column_groups:
+                column_groups = [frame]
+            for group_index, group in enumerate(column_groups, start=1):
+                if group_index > 1:
+                    story.append(PageBreak())
+                    story.append(Paragraph(
+                        f"Suite des données — groupe de colonnes {group_index}/{len(column_groups)}",
+                        section,
+                    ))
+                table = _pdf_table(group, body, head, usable_width=523, max_rows=None)
+                if table is not None:
+                    story.append(table)
+                # Le PDF garde toutes les lignes; le découpage est confié à ReportLab.
 
     try:
         doc.build(story, onFirstPage=_pdf_header_footer, onLaterPages=_pdf_header_footer)
@@ -986,11 +1009,12 @@ def pdf_bytes(data, title="Rapport CRA/ISRA"):
             for row_number, (_, row) in enumerate(data.fillna("").iterrows(), start=1):
                 fallback_story.append(Paragraph(f"Enregistrement {row_number}", section))
                 for column, value in row.items():
-                    label = _safe_para_text(column)
-                    value_text = _safe_para_text(value)
-                    # Un paragraphe distinct par champ autorise le passage à la page suivante.
-                    fallback_story.append(Paragraph(f"<b>{label} :</b> {value_text}", body))
-                    fallback_story.append(Spacer(1, 3))
+                    # Les textes sont découpés en fragments indépendants. Aucune limite
+                    # de longueur n'est appliquée : un champ de 100 pages ou davantage
+                    # est réparti sur autant de pages que nécessaire, sans troncature.
+                    _append_long_pdf_text(
+                        fallback_story, f"{column} :", value, body
+                    )
                 fallback_story.append(Spacer(1, 8))
         try:
             fallback_doc.build(
@@ -1012,6 +1036,51 @@ def _safe_para_text(value):
     return (text_value.replace("&", "&amp;").replace("<", "&lt;")
             .replace(">", "&gt;").replace("\r\n", "<br/>")
             .replace("\n", "<br/>").replace("\r", "<br/>"))
+
+
+def _split_pdf_text(value, max_chars=1600):
+    """Découpe un champ texte massif en fragments sûrs sans supprimer de contenu.
+
+    Les fragments sont séparés de préférence aux espaces ou aux retours à la ligne.
+    Cela évite de demander à ReportLab de mettre en page un unique paragraphe énorme
+    et permet aux textes de plusieurs centaines de pages de continuer naturellement.
+    """
+    if value is None:
+        return [""]
+    text_value = str(value).replace("\r\n", "\n").replace("\r", "\n")
+    if not text_value:
+        return [""]
+
+    chunks = []
+    for source_line in text_value.split("\n"):
+        if source_line == "":
+            chunks.append("")
+            continue
+        remaining = source_line
+        while len(remaining) > max_chars:
+            cut = remaining.rfind(" ", 0, max_chars + 1)
+            if cut < max_chars // 2:
+                cut = max_chars
+            chunks.append(remaining[:cut])
+            remaining = remaining[cut:].lstrip()
+        chunks.append(remaining)
+    return chunks or [""]
+
+
+def _append_long_pdf_text(story, label, value, body_style, label_style=None):
+    """Ajoute un champ texte en fragments indépendants, paginables par ReportLab."""
+    safe_label = _safe_para_text(label)
+    if label_style is not None:
+        story.append(Paragraph(f"<b>{safe_label}</b>", label_style))
+    else:
+        story.append(Paragraph(f"<b>{safe_label}</b>", body_style))
+
+    chunks = _split_pdf_text(value)
+    for chunk in chunks:
+        # Chaque fragment est un Paragraph distinct : ReportLab peut donc passer à
+        # la page suivante entre deux fragments même pour des champs extrêmement longs.
+        story.append(Paragraph(_safe_para_text(chunk) or "&nbsp;", body_style))
+    story.append(Spacer(1, 4))
 
 
 def _pdf_report_view(frame, columns, labels=None):
@@ -1805,7 +1874,10 @@ def render_activities():
         st.dataframe(data, use_container_width=True, hide_index=True)
     else:
         st.info("Aucune activité enregistrée.")
-    export_buttons(data, "activites", "Activités CRA/ISRA")
+    # Les exports doivent afficher explicitement le type d'activité avec un libellé
+    # compréhensible, aussi bien dans les tableaux PDF que dans Excel et CSV.
+    export_data = data.rename(columns={"type_activite": "Type d’activité"}).copy()
+    export_buttons(export_data, "activites", "Activités CRA/ISRA")
 
 
 def _communication_actions():
