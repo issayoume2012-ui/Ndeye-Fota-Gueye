@@ -895,6 +895,105 @@ def _pdf_kpi_table(kpis, body_style):
     return tbl
 
 
+def _is_activity_dataset(frame, title=""):
+    """Détecte l'export des activités sans dépendre de tous les libellés exacts."""
+    if frame is None or frame.empty:
+        return False
+    cols = {str(c).strip().lower().replace("’", "'") for c in frame.columns}
+    title_text = str(title).lower()
+    has_activity_title = any(x in title_text for x in ("activité", "activite", "activités", "activites"))
+    has_activity_fields = (
+        any(c in cols for c in ("titre", "intitulé", "intitule"))
+        and any(c in cols for c in ("heure_debut", "heure début", "heure de début"))
+        and any(c in cols for c in ("type_activite", "type d’activité", "type d'activite", "type"))
+    )
+    return has_activity_title or has_activity_fields
+
+
+def _activity_color(index):
+    """Retourne une couleur pastel distincte pour chaque activité du PDF."""
+    palette = [
+        ("#EAF4FF", "#91BDEB", "#173B63"),  # bleu clair
+        ("#EAF8EF", "#91CBA3", "#205638"),  # vert clair
+        ("#FFF3E6", "#E8B982", "#75451D"),  # pêche clair
+        ("#F5EDFF", "#BDA3E8", "#51357A"),  # violet clair
+        ("#FFF0F3", "#E5A2B0", "#7A3445"),  # rose clair
+        ("#FFF9DF", "#E2CE75", "#665515"),  # jaune clair
+        ("#E6FAF8", "#8CCFC7", "#205C58"),  # turquoise clair
+        ("#F0F2F5", "#B7C0CC", "#374151"),  # gris clair
+        ("#FBEFE5", "#DDB49A", "#70452D"),  # beige clair
+        ("#EEF5E5", "#B5CD8E", "#435B26"),  # vert olive clair
+    ]
+    return palette[(index - 1) % len(palette)]
+
+
+def _append_activity_pdf_cards(story, frame, body_style, section_style):
+    """Présente chaque activité dans une fiche colorée, avec une teinte pastel propre."""
+    widths = [112, 411]
+    for index, (_, row) in enumerate(frame.iterrows(), start=1):
+        fill_hex, border_hex, text_hex = _activity_color(index)
+        fill = colors.HexColor(fill_hex)
+        border = colors.HexColor(border_hex)
+        label_style = ParagraphStyle(
+            f"ActivityFieldLabel{index}", parent=body_style,
+            fontName="Helvetica-Bold", fontSize=7.2, leading=9,
+            textColor=colors.HexColor(text_hex),
+        )
+        activity_style = ParagraphStyle(
+            f"ActivityCardText{index}", parent=body_style,
+            fontSize=7.2, leading=9, textColor=colors.HexColor(text_hex),
+            wordWrap="CJK",
+        )
+        raw_title = ""
+        for key in row.index:
+            if str(key).strip().lower() in ("titre", "intitulé", "intitule"):
+                value = row[key]
+                raw_title = "" if value is None else str(value).strip()
+                break
+        heading = f"Activité {index}" + (f" — {raw_title}" if raw_title and raw_title.lower() != "nan" else "")
+        heading_style = ParagraphStyle(
+            f"ActivityHeading{index}", parent=section_style,
+            textColor=colors.HexColor(text_hex), fontSize=10, leading=12,
+            spaceBefore=0, spaceAfter=0,
+        )
+        heading_cell = Paragraph(_safe_para_text(heading), heading_style)
+        heading_table = Table([[heading_cell]], colWidths=[523], hAlign="LEFT")
+        heading_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), fill),
+            ("BOX", (0, 0), (-1, -1), 0.7, border),
+            ("LEFTPADDING", (0, 0), (-1, -1), 7),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 7),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ]))
+        story.append(Spacer(1, 5))
+        story.append(heading_table)
+
+        # Chaque fragment reste dans la même couleur, même si le texte se poursuit
+        # sur plusieurs pages.
+        for column, value in row.items():
+            text_value = "" if value is None else str(value)
+            if text_value.lower() in ("nan", "none", "nat"):
+                text_value = ""
+            chunks = _split_pdf_text(text_value, max_chars=1000)
+            for part_index, chunk in enumerate(chunks):
+                label = str(column) if part_index == 0 else f"{column} (suite)"
+                cell_label = Paragraph(_safe_para_text(label), label_style)
+                cell_value = Paragraph(_safe_para_text(chunk) or "&nbsp;", activity_style)
+                row_table = Table([[cell_label, cell_value]], colWidths=widths, hAlign="LEFT", splitByRow=1, splitInRow=1)
+                row_table.setStyle(TableStyle([
+                    ("BACKGROUND", (0, 0), (-1, -1), fill),
+                    ("BOX", (0, 0), (-1, -1), 0.35, border),
+                    ("INNERGRID", (0, 0), (-1, -1), 0.25, border),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 5),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+                    ("TOPPADDING", (0, 0), (-1, -1), 3),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+                ]))
+                story.append(row_table)
+        story.append(Spacer(1, 8))
+
 def pdf_bytes(data, title="Rapport CRA/ISRA"):
     """Génère un PDF robuste : pages découpées, colonnes paginées et repli sécurisé."""
     if not REPORTLAB_AVAILABLE:
@@ -955,7 +1054,13 @@ def pdf_bytes(data, title="Rapport CRA/ISRA"):
             except (TypeError, ValueError):
                 max_cell_length = 0
 
-        if max_cell_length > 3000:
+        if _is_activity_dataset(frame, title):
+            story.append(Paragraph(
+                "Chaque activité est présentée dans une fiche avec sa propre couleur pastel "
+                "pour la distinguer des autres activités. La palette se répète après dix couleurs.", subtitle
+            ))
+            _append_activity_pdf_cards(story, frame, body, section)
+        elif max_cell_length > 3000:
             story.append(Paragraph(
                 "Présentation détaillée activée automatiquement pour préserver "
                 "l'intégralité des textes longs.", subtitle
@@ -1006,16 +1111,20 @@ def pdf_bytes(data, title="Rapport CRA/ISRA"):
         if data is None or data.empty:
             fallback_story.append(Paragraph("Aucune donnée à afficher.", body))
         else:
-            for row_number, (_, row) in enumerate(data.fillna("").iterrows(), start=1):
-                fallback_story.append(Paragraph(f"Enregistrement {row_number}", section))
-                for column, value in row.items():
-                    # Les textes sont découpés en fragments indépendants. Aucune limite
-                    # de longueur n'est appliquée : un champ de 100 pages ou davantage
-                    # est réparti sur autant de pages que nécessaire, sans troncature.
-                    _append_long_pdf_text(
-                        fallback_story, f"{column} :", value, body
-                    )
-                fallback_story.append(Spacer(1, 8))
+            fallback_frame = data.fillna("")
+            if _is_activity_dataset(fallback_frame, title):
+                _append_activity_pdf_cards(fallback_story, fallback_frame, body, section)
+            else:
+                for row_number, (_, row) in enumerate(fallback_frame.iterrows(), start=1):
+                    fallback_story.append(Paragraph(f"Enregistrement {row_number}", section))
+                    for column, value in row.items():
+                        # Les textes sont découpés en fragments indépendants. Aucune limite
+                        # de longueur n'est appliquée : un champ de 100 pages ou davantage
+                        # est réparti sur autant de pages que nécessaire, sans troncature.
+                        _append_long_pdf_text(
+                            fallback_story, f"{column} :", value, body
+                        )
+                    fallback_story.append(Spacer(1, 8))
         try:
             fallback_doc.build(
                 fallback_story, onFirstPage=_pdf_header_footer, onLaterPages=_pdf_header_footer
