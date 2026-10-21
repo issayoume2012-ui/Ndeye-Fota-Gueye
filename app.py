@@ -2111,7 +2111,7 @@ def render_activities():
     with st.form("activity_form"):
         c1, c2, c3 = st.columns(3)
         titre = c1.text_input("Titre *")
-        type_a = c2.selectbox("Type", ["Animation scientifique","Atelier","Réunion","Formation","Sensibilisation","Conférence","Séminaire","Forum","Salon","Foire","Journée portes ouvertes","Visite","Mission","Rencontre partenaires","Communication","Documentation","Bibliothèque","Autre"])
+        type_a = c2.selectbox("Type", ["Animation scientifique","Atelier","Réunion","Formation","Sensibilisation","Conférence","Séminaire","Forum","Salon","Foire","Journée portes ouvertes","Journée d’investissement humain (JIH)","Visite","Mission","Rencontre partenaires","Communication","Documentation","Bibliothèque","Autre"])
         domaine = c3.text_input("Domaine")
         c1, c2, c3 = st.columns(3)
         hd = c1.text_input("Heure début (facultatif)", placeholder="09:00")
@@ -2600,52 +2600,43 @@ def render_reports():
         return
 
     # ============================================================
-    # DONNÉES DE LA NOUVELLE STRUCTURE
+    # DONNÉES DU RAPPORT — STRICTEMENT LIMITÉES À LA PÉRIODE CHOISIE
     # ============================================================
-    # IMPORTANT : les activités sont le centre de l'onglet Communication.
-    # Le rapport doit reprendre les activités déjà renseignées dans la plateforme,
-    # même lorsqu'elles ne tombent pas dans la période sélectionnée. Cela évite de
-    # produire un rapport « Activités » vide alors que des activités existent déjà.
+    # Une activité est incluse si sa période chevauche la période du rapport.
     activities = df(
-        "SELECT * FROM activities "
-        "ORDER BY date_activite, id"
+        "SELECT *, (date_fin - date_activite + 1) AS duree_jours FROM activities "
+        "WHERE date_activite <= ? AND COALESCE(date_fin, date_activite) >= ? "
+        "ORDER BY date_activite, id",
+        (str(end), str(start)),
     )
 
-    # IMPORTANT : le rapport premium est un rapport GLOBAL de capitalisation.
-    # On ne filtre plus les tables de Communication par la période choisie :
-    # une donnée déjà renseignée doit toujours apparaître dans le rapport.
-    # La période reste affichée sur la couverture et dans les indicateurs pour
-    # contextualiser la génération, tandis que l'intégralité des enregistrements
-    # est conservée dans le PDF et l'Excel.
     communications = df(
-        "SELECT * FROM communications "
-        "ORDER BY date_publication NULLS LAST, id"
+        "SELECT * FROM communications WHERE date_publication BETWEEN ? AND ? "
+        "ORDER BY date_publication NULLS LAST, id",
+        (str(start), str(end)),
     )
-
     media_df = df(
-        "SELECT * FROM media "
-        "ORDER BY date_intervention NULLS LAST, id"
+        "SELECT * FROM media WHERE date_intervention BETWEEN ? AND ? "
+        "ORDER BY date_intervention NULLS LAST, id",
+        (str(start), str(end)),
     )
-
     av = df(
-        "SELECT * FROM audiovisual "
-        "ORDER BY date_production NULLS LAST, id"
+        "SELECT * FROM audiovisual WHERE date_production BETWEEN ? AND ? "
+        "ORDER BY date_production NULLS LAST, id",
+        (str(start), str(end)),
     )
 
+    # Les formats, documents du catalogue, ouvrages, personnes et profils sont
+    # des référentiels sans date d'activité fiable : ils restent disponibles.
     formats = df(
-        "SELECT * FROM communication_formats "
-        "ORDER BY categorie, nom_format"
+        "SELECT * FROM communication_formats ORDER BY categorie, nom_format"
     )
-
     documents = df(
-        "SELECT * FROM documents "
-        "ORDER BY annee DESC, id DESC"
+        "SELECT * FROM documents WHERE annee BETWEEN ? AND ? "
+        "ORDER BY annee DESC, id DESC",
+        (start.year, end.year),
     )
-
-    library = df(
-        "SELECT * FROM library_items "
-        "ORDER BY titre"
-    )
+    library = df("SELECT * FROM library_items ORDER BY titre")
 
     consultations = df(
         "SELECT c.id, c.date_consultation, "
@@ -2658,7 +2649,6 @@ def render_reports():
         "ORDER BY c.date_consultation, c.id",
         (str(start), str(end)),
     )
-
     loans = df(
         "SELECT l.id, l.date_emprunt, l.date_retour_prevue, l.date_retour_reelle, "
         "l.statut, l.observations, "
@@ -2695,16 +2685,16 @@ def render_reports():
 
     scientific = df(
         "SELECT * FROM scientific_results "
-        "WHERE created_at::date BETWEEN ? AND ? "
+        "WHERE annee BETWEEN ? AND ? "
         "ORDER BY annee DESC, id DESC",
-        (str(start), str(end)),
+        (start.year, end.year),
     )
 
     publications = df(
         "SELECT * FROM scientific_publications "
-        "WHERE created_at::date BETWEEN ? AND ? "
+        "WHERE annee BETWEEN ? AND ? "
         "ORDER BY annee DESC, id DESC",
-        (str(start), str(end)),
+        (start.year, end.year),
     )
 
     profiles = df(
@@ -2740,14 +2730,16 @@ def render_reports():
     """, (str(start), str(end)))
 
     # ============================================================
-    # INDICATEURS — état global des données enregistrées
+    # INDICATEURS — données de la période sélectionnée
     # ============================================================
     st.info(
-        f"Rapport global : les données existantes sont incluses. "
-        f"Période de génération sélectionnée : {start} → {end}. "
-        "Cette période ne masque aucune saisie déjà enregistrée."
+        f"Le rapport global est filtré sur la période du {start:%d/%m/%Y} "
+        f"au {end:%d/%m/%Y}. Les indicateurs, l’aperçu et les exports "
+        "reprennent les enregistrements correspondant à cette période. "
+        "Les référentiels sans date (catalogue, formats, personnes et profils) "
+        "restent disponibles comme données de référence."
     )
-    st.subheader("📌 Indicateurs globaux")
+    st.subheader("📌 Indicateurs de la période")
 
     vals = [
         ("Activités", len(activities)),
