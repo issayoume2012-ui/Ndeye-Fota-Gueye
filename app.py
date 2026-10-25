@@ -1567,6 +1567,8 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
         ("Bibliothèque", report_data.get("Bibliothèque")),
         ("Résultats scientifiques", report_data.get("Résultats scientifiques")),
         ("Publications scientifiques", report_data.get("Publications scientifiques")),
+        ("Notes politiques", report_data.get("Notes politiques")),
+        ("Notes de synthèse", report_data.get("Notes de synthèse")),
         ("Visiteurs", report_data.get("Visiteurs")),
         ("Valorisation chercheurs", report_data.get("Valorisation chercheurs")),
     ]
@@ -1598,13 +1600,13 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
          str(sum(len(report_data.get(k, pd.DataFrame())) for k in [
              "Activités", "Communication", "Médias", "Audiovisuel", "Formats"
          ]))],
-        ["Documentations", "Documentation IST, bibliothèque, consultations, prêts",
+        ["Documentations", "Bibliothèque, consultations, prêts/retours et personnes",
          str(sum(len(report_data.get(k, pd.DataFrame())) for k in [
-             "Documents IST", "Bibliothèque", "Consultations", "Prêts"
+             "Bibliothèque", "Consultations", "Prêts", "Personnes"
          ]))],
-        ["Résultat scientifique", "Résultats scientifiques et publications",
+        ["Résultat scientifique", "Résultats, publications et Documentation IST",
          str(sum(len(report_data.get(k, pd.DataFrame())) for k in [
-             "Résultats scientifiques", "Publications scientifiques"
+             "Résultats scientifiques", "Publications scientifiques", "Documents IST"
          ]))],
         ["Visiteurs", "Registre des visiteurs",
          str(len(report_data.get("Visiteurs", pd.DataFrame())))],
@@ -1691,20 +1693,18 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     # ------------------------------------------------------------
     story.extend(_pdf_section_header(
         "03", "DOCUMENTATIONS",
-        "Documentation IST, bibliothèque, consultations et prêts/retours.",
+        "Bibliothèque, consultations, personnes et prêts/retours.",
         section
     ))
 
     documentation_sections = [
-        ("3.1", "Documentation IST", "Ressources documentaires et fonds IST.",
-         report_data.get("Documents IST")),
-        ("3.2", "Bibliothèque", "État du catalogue et des disponibilités.",
+        ("3.1", "Bibliothèque", "État du catalogue et des disponibilités.",
          report_data.get("Bibliothèque")),
-        ("3.3", "Consultations", "Historique des consultations.",
+        ("3.2", "Consultations", "Historique des consultations.",
          report_data.get("Consultations")),
-        ("3.4", "Prêts & retours", "Suivi des emprunts et retours.",
+        ("3.3", "Prêts & retours", "Suivi des emprunts et retours.",
          report_data.get("Prêts")),
-        ("3.5", "Personnes", "Personnes enregistrées comme acteurs documentaires.",
+        ("3.4", "Personnes", "Personnes enregistrées comme acteurs documentaires.",
          report_data.get("Personnes")),
     ]
 
@@ -1732,9 +1732,18 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
         ("4.1", "Résultats scientifiques",
          "Fiches techniques, mémoires, thèses, rapports et autres résultats.",
          report_data.get("Résultats scientifiques")),
-        ("4.2", "Publications scientifiques",
-         "Notes politiques et notes de synthèse.",
+        ("4.2", "Publication scientifique",
+         "Vue d'ensemble de toutes les publications scientifiques.",
          report_data.get("Publications scientifiques")),
+        ("4.3", "Note politique",
+         "Notes politiques enregistrées dans le registre des publications.",
+         report_data.get("Notes politiques")),
+        ("4.4", "Note de synthèse",
+         "Notes de synthèse enregistrées dans le registre des publications.",
+         report_data.get("Notes de synthèse")),
+        ("4.5", "Documentation IST",
+         "Recherche, veille, ressources documentaires et fonds IST.",
+         report_data.get("Documents IST")),
     ]
 
     for num, title, desc, frame in scientific_sections:
@@ -1878,12 +1887,13 @@ CRUD_TABLES_BY_PAGE = {
         "Formats de communication": "communication_formats",
     },
     "📚 Documentations": {
-        "Catalogue bibliothèque": "library_items", "Documentation IST": "documents",
-        "Personnes": "people", "Consultations": "consultations", "Prêts et retours": "loans",
+        "Catalogue bibliothèque": "library_items", "Personnes": "people",
+        "Consultations": "consultations", "Prêts et retours": "loans",
     },
     "👥 Visiteurs": {"Registre des visiteurs": "library_visits"},
     "🔬 Résultat scientifique": {
         "Résultats scientifiques": "scientific_results", "Publications scientifiques": "scientific_publications",
+        "Documentation IST": "documents",
     },
     "🧬 Valorisation chercheurs": {
         "Profils chercheurs": "researcher_profiles", "Actions de valorisation": "researcher_valorization",
@@ -2019,6 +2029,11 @@ def render_dashboard():
         ("Publications/actions", scalar("SELECT COUNT(*) FROM communications")),
         ("Documents IST", scalar("SELECT COUNT(*) FROM documents")),
         ("Documents bibliothèque", scalar("SELECT COUNT(*) FROM library_items")),
+        ("Consultations", scalar("SELECT COUNT(*) FROM consultations")),
+        ("Résultats scientifiques", scalar("SELECT COUNT(*) FROM scientific_results")),
+        ("Publications scientifiques", scalar("SELECT COUNT(*) FROM scientific_publications")),
+        ("Notes politiques", scalar("SELECT COUNT(*) FROM scientific_publications WHERE type_publication='Note politique'")),
+        ("Notes de synthèse", scalar("SELECT COUNT(*) FROM scientific_publications WHERE type_publication='Note de synthèse'")),
         ("Visiteurs", scalar("SELECT COUNT(*) FROM library_visits")),
         ("Prêts en cours", scalar("SELECT COUNT(*) FROM loans WHERE statut='En cours'")),
         ("Prêts en retard", scalar("SELECT COUNT(*) FROM loans WHERE statut='En retard'")),
@@ -2270,10 +2285,14 @@ def render_communication():
     with t3: _communication_audiovisual_formats()
 
 def render_documentations():
+    """Espace Documentation organisé en quatre onglets métier indépendants."""
     st.header("📚 Documentations")
-    st.caption("Un bloc riche pour la Biblio + Documentation IST, complété par Personnes & Prêts.")
-    t1,t2=st.tabs(["📚 Biblio & Documentation IST","👥 Personnes & prêts"])
-    with t1:
+    st.caption("Gestion séparée de la bibliothèque, des consultations, des personnes et des prêts/retours.")
+    tab_biblio, tab_consult, tab_people, tab_loans = st.tabs([
+        "📚 Biblio", "📖 Consultations", "👥 Personnes", "📕 Prêts & retours"
+    ])
+
+    with tab_biblio:
         st.subheader("📚 Catalogue et gestion des documents")
         with st.form("lib_form_new"):
             c1,c2,c3=st.columns(3)
@@ -2302,8 +2321,9 @@ def render_documentations():
         catalog=df("SELECT id,inventaire,cote,titre,auteurs,annee,type_document,exemplaires,disponibles,localisation,etat FROM library_items ORDER BY titre")
         st.dataframe(catalog,use_container_width=True,hide_index=True)
         export_buttons(catalog,"catalogue_bibliotheque","Catalogue de la bibliothèque CRA/ISRA")
-        st.divider()
-        st.subheader("📖 Consultations")
+
+    with tab_consult:
+        st.subheader("📖 Consultations des documents")
         people=options_people(); items=options_items()
         with st.form("consult_form_new"):
             person=st.selectbox("Personne",["—"]+list(people)); item=st.selectbox("Document",["—"]+list(items))
@@ -2319,88 +2339,96 @@ def render_documentations():
                  ORDER BY c.date_consultation DESC""")
         st.dataframe(consultations_data,use_container_width=True,hide_index=True)
         export_buttons(consultations_data,"consultations","Consultations des documents CRA/ISRA")
-        st.divider()
-        st.subheader("📄 Documentation IST — recherche, veille, ressources et fonds")
-        st.subheader("📄 Documentation IST")
-        with st.form("doc_form_new"):
+
+    with tab_people:
+        st.subheader("👥 Personnes")
+        with st.form("person_form_new"):
             c1,c2,c3=st.columns(3)
-            titre=c1.text_input("Titre *"); auteurs=c2.text_input("Auteur(s)"); annee=c3.number_input("Année",1900,2100,value=date.today().year)
+            nom=c1.text_input("Nom *"); prenom=c2.text_input("Prénom"); fonction=c3.text_input("Fonction")
             c1,c2,c3=st.columns(3)
-            typ=c1.selectbox("Type",["Article scientifique","Mémoire","Thèse","Rapport","Communication","Publication","Document technique","Guide","Brochure","Plaquette","Revue","Bulletin","Autre"])
-            theme=c2.text_input("Thématique"); mots=c3.text_input("Mots-clés")
-            chercheur=st.text_input("Chercheur associé"); projet=st.text_input("Projet")
-            resume=st.text_area("Résumé")
-            c1,c2,c3=st.columns(3)
-            langue=c1.text_input("Langue",value="Français"); pages=c2.number_input("Pages",0,step=1); reference=c3.text_input("Référence")
-            lien=st.text_input("Lien")
-            fichier=None
-            statut=st.selectbox("Statut",["Disponible","À vérifier","Archivé"])
+            structure=c1.text_input("Structure / institution"); categorie=c2.selectbox("Catégorie",["Chercheur","Enseignant-chercheur","Technicien","Personnel administratif","Personnel CRA/ISRA","Étudiant","Stagiaire","Producteur","Organisation de producteurs","Partenaire technique","Partenaire financier","Institution publique","Décideur","Journaliste","Média","ONG","Organisation professionnelle","Visiteur","Communauté locale","Jeune","Grand public","Autre"]); localite=c3.text_input("Localité")
+            c1,c2,c3=st.columns(3); telephone=c1.text_input("Téléphone"); email=c2.text_input("Email"); region=c3.text_input("Région")
             observations=st.text_area("Observations")
-            ok=st.form_submit_button("💾 Ajouter le document",type="primary")
+            ok=st.form_submit_button("💾 Ajouter la personne",type="primary")
         if ok:
+            if not nom.strip(): st.error("Le nom est obligatoire.")
+            else:
+                q("""INSERT INTO people(nom,prenom,fonction,structure,categorie,telephone,email,localite,region,observations)
+                     VALUES(?,?,?,?,?,?,?,?,?,?)""",(nom,prenom,fonction,structure,categorie,telephone,email,localite,region,observations))
+                st.success("Personne ajoutée."); st.rerun()
+        data=df("SELECT id,nom,prenom,fonction,structure,categorie,telephone,email,localite,region FROM people ORDER BY nom")
+        st.dataframe(data,use_container_width=True,hide_index=True)
+        export_buttons(data,"personnes","Registre des personnes CRA/ISRA")
+
+    with tab_loans:
+        st.subheader("📕 Prêts, retours et échéances")
+        people=options_people(); items=options_items()
+        with st.form("loan_form_new"):
+            person=st.selectbox("Emprunteur",["—"]+list(people)); item=st.selectbox("Document",["—"]+list(items))
+            c1,c2=st.columns(2); de=c1.date_input("Date d'emprunt",date.today()); dr=c2.date_input("Date prévue de retour",date.today()+timedelta(days=14))
+            observations=st.text_area("Observations")
+            ok=st.form_submit_button("📕 Enregistrer le prêt",type="primary")
+        if ok:
+            iid=items.get(item); dispo=scalar("SELECT disponibles FROM library_items WHERE id=?",(iid,)) if iid else 0
+            if not people.get(person) or not iid: st.error("Sélectionnez l'emprunteur et le document.")
+            elif dispo <= 0: st.error("Aucun exemplaire disponible.")
+            else:
+                q("""INSERT INTO loans(person_id,item_id,date_emprunt,date_retour_prevue,statut,observations)
+                     VALUES(?,?,?,?,?,?)""",(people.get(person),iid,str(de),str(dr),"En cours",observations))
+                q("UPDATE library_items SET disponibles=disponibles-1 WHERE id=?",(iid,)); st.success("Prêt enregistré."); st.rerun()
+        loans=df("""SELECT l.id,p.nom||' '||COALESCE(p.prenom,'') AS emprunteur,i.titre,i.inventaire,l.date_emprunt,l.date_retour_prevue,l.date_retour_reelle,l.statut,l.observations
+                FROM loans l LEFT JOIN people p ON p.id=l.person_id LEFT JOIN library_items i ON i.id=l.item_id ORDER BY l.date_retour_prevue""")
+        if not loans.empty:
+            q("UPDATE loans SET statut='En retard' WHERE statut='En cours' AND date_retour_prevue < ?",(date.today().isoformat(),))
+            loans=df("""SELECT l.id,p.nom||' '||COALESCE(p.prenom,'') AS emprunteur,i.titre,i.inventaire,l.date_emprunt,l.date_retour_prevue,l.date_retour_reelle,l.statut,l.observations
+                FROM loans l LEFT JOIN people p ON p.id=l.person_id LEFT JOIN library_items i ON i.id=l.item_id ORDER BY l.date_retour_prevue""")
+        st.dataframe(loans,use_container_width=True,hide_index=True)
+        export_buttons(loans,"prets_retours","Registre des prêts et retours CRA/ISRA")
+        active=df("""SELECT l.id,p.nom||' '||COALESCE(p.prenom,'') AS emprunteur,i.titre,l.date_retour_prevue,l.statut
+              FROM loans l LEFT JOIN people p ON p.id=l.person_id LEFT JOIN library_items i ON i.id=l.item_id
+              WHERE l.statut IN ('En cours','En retard') ORDER BY l.date_retour_prevue""")
+        if not active.empty:
+            labels={f"#{r.id} — {r.emprunteur} — {r.titre} — retour prévu {r.date_retour_prevue}":r.id for r in active.itertuples()}
+            chosen=st.selectbox("Prêt à retourner",list(labels)); retour=st.date_input("Date réelle de retour",date.today(),key="return_date_new")
+            if st.button("↩️ Valider le retour",type="primary"):
+                lid=labels[chosen]; iid=scalar("SELECT item_id FROM loans WHERE id=?",(lid,))
+                q("UPDATE loans SET date_retour_reelle=?,statut='Retourné' WHERE id=?",(str(retour),lid)); q("UPDATE library_items SET disponibles=disponibles+1 WHERE id=?",(iid,))
+                st.success("Retour enregistré."); st.rerun()
+        else: st.info("Aucun prêt en cours.")
+
+    st.info("Les exports PDF utilisent un format A4 portrait, avec couverture graphique, en-têtes/pieds de page et toutes les données des registres exportés.")
+
+
+def render_documentation_ist():
+    """Onglet Documentation IST déplacé dans Résultat scientifique."""
+    st.subheader("📄 Documentation IST")
+    st.caption("Recherche, veille, ressources documentaires et fonds IST.")
+    with st.form("doc_form_new"):
+        c1,c2,c3=st.columns(3)
+        titre=c1.text_input("Titre *"); auteurs=c2.text_input("Auteur(s)"); annee=c3.number_input("Année",1900,2100,value=date.today().year)
+        c1,c2,c3=st.columns(3)
+        typ=c1.selectbox("Type",["Article scientifique","Mémoire","Thèse","Rapport","Communication","Publication","Document technique","Guide","Brochure","Plaquette","Revue","Bulletin","Autre"])
+        theme=c2.text_input("Thématique"); mots=c3.text_input("Mots-clés")
+        chercheur=st.text_input("Chercheur associé"); projet=st.text_input("Projet")
+        resume=st.text_area("Résumé")
+        c1,c2,c3=st.columns(3)
+        langue=c1.text_input("Langue",value="Français"); pages=c2.number_input("Pages",0,step=1); reference=c3.text_input("Référence")
+        lien=st.text_input("Lien")
+        fichier=None
+        statut=st.selectbox("Statut",["Disponible","À vérifier","Archivé"])
+        observations=st.text_area("Observations")
+        ok=st.form_submit_button("💾 Ajouter le document",type="primary")
+    if ok:
+        if not titre.strip():
+            st.error("Le titre est obligatoire.")
+        else:
             path=save_uploaded(fichier,"documents")
             q("""INSERT INTO documents(titre,auteurs,annee,type_document,thematique,mots_cles,chercheur_associe,projet,resume,langue,pages,reference,fichier,lien,statut,observations)
                  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(titre,auteurs,annee,typ,theme,mots,chercheur,projet,resume,langue,pages,reference,path,lien,statut,observations))
-            st.success("Document enregistré."); st.rerun()
-        data=df("SELECT id,titre,auteurs,annee,type_document,thematique,reference,statut FROM documents ORDER BY annee DESC,id DESC")
-        st.dataframe(data,use_container_width=True,hide_index=True)
-        export_buttons(data,"documentation_ist","Documentation IST CRA/ISRA")
-    with t2:
-        ptab, ltab = st.tabs(["👥 Personnes", "📕 Prêts & retours"])
-        with ptab:
-            st.subheader("👥 Personnes")
-            with st.form("person_form_new"):
-                c1,c2,c3=st.columns(3)
-                nom=c1.text_input("Nom *"); prenom=c2.text_input("Prénom"); fonction=c3.text_input("Fonction")
-                c1,c2,c3=st.columns(3)
-                structure=c1.text_input("Structure / institution"); categorie=c2.selectbox("Catégorie",["Chercheur","Enseignant-chercheur","Technicien","Personnel administratif","Personnel CRA/ISRA","Étudiant","Stagiaire","Producteur","Organisation de producteurs","Partenaire technique","Partenaire financier","Institution publique","Décideur","Journaliste","Média","ONG","Organisation professionnelle","Visiteur","Communauté locale","Jeune","Grand public","Autre"]); localite=c3.text_input("Localité")
-                c1,c2,c3=st.columns(3); telephone=c1.text_input("Téléphone"); email=c2.text_input("Email"); region=c3.text_input("Région")
-                observations=st.text_area("Observations")
-                ok=st.form_submit_button("💾 Ajouter la personne",type="primary")
-            if ok:
-                if not nom.strip(): st.error("Le nom est obligatoire.")
-                else:
-                    q("""INSERT INTO people(nom,prenom,fonction,structure,categorie,telephone,email,localite,region,observations)
-                         VALUES(?,?,?,?,?,?,?,?,?,?)""",(nom,prenom,fonction,structure,categorie,telephone,email,localite,region,observations))
-                    st.success("Personne ajoutée."); st.rerun()
-            data=df("SELECT id,nom,prenom,fonction,structure,categorie,telephone,email,localite,region FROM people ORDER BY nom")
-            st.dataframe(data,use_container_width=True,hide_index=True)
-            export_buttons(data,"personnes","Registre des personnes CRA/ISRA")
-        with ltab:
-            st.subheader("📕 Prêts, retours et échéances")
-            people=options_people(); items=options_items()
-            with st.form("loan_form_new"):
-                person=st.selectbox("Emprunteur",["—"]+list(people)); item=st.selectbox("Document",["—"]+list(items))
-                c1,c2=st.columns(2); de=c1.date_input("Date d'emprunt",date.today()); dr=c2.date_input("Date prévue de retour",date.today()+timedelta(days=14))
-                observations=st.text_area("Observations")
-                ok=st.form_submit_button("📕 Enregistrer le prêt",type="primary")
-            if ok:
-                iid=items.get(item); dispo=scalar("SELECT disponibles FROM library_items WHERE id=?",(iid,)) if iid else 0
-                if not people.get(person) or not iid: st.error("Sélectionnez l'emprunteur et le document.")
-                elif dispo <= 0: st.error("Aucun exemplaire disponible.")
-                else:
-                    q("""INSERT INTO loans(person_id,item_id,date_emprunt,date_retour_prevue,statut,observations)
-                         VALUES(?,?,?,?,?,?)""",(people.get(person),iid,str(de),str(dr),"En cours",observations))
-                    q("UPDATE library_items SET disponibles=disponibles-1 WHERE id=?",(iid,)); st.success("Prêt enregistré."); st.rerun()
-            loans=df("""SELECT l.id,p.nom||' '||COALESCE(p.prenom,'') AS emprunteur,i.titre,i.inventaire,l.date_emprunt,l.date_retour_prevue,l.date_retour_reelle,l.statut,l.observations
-                    FROM loans l LEFT JOIN people p ON p.id=l.person_id LEFT JOIN library_items i ON i.id=l.item_id ORDER BY l.date_retour_prevue""")
-            if not loans.empty:
-                q("""UPDATE loans SET statut='En retard' WHERE statut='En cours' AND date_retour_prevue < ?""",(date.today().isoformat(),))
-                loans=df("""SELECT l.id,p.nom||' '||COALESCE(p.prenom,'') AS emprunteur,i.titre,i.inventaire,l.date_emprunt,l.date_retour_prevue,l.date_retour_reelle,l.statut,l.observations
-                    FROM loans l LEFT JOIN people p ON p.id=l.person_id LEFT JOIN library_items i ON i.id=l.item_id ORDER BY l.date_retour_prevue""")
-            st.dataframe(loans,use_container_width=True,hide_index=True)
-            export_buttons(loans,"prets_retours","Registre des prêts et retours CRA/ISRA")
-            active=df("""SELECT l.id,p.nom||' '||COALESCE(p.prenom,'') AS emprunteur,i.titre,l.date_retour_prevue,l.statut
-                  FROM loans l LEFT JOIN people p ON p.id=l.person_id LEFT JOIN library_items i ON i.id=l.item_id
-                  WHERE l.statut IN ('En cours','En retard') ORDER BY l.date_retour_prevue""")
-            if not active.empty:
-                labels={f"#{r.id} — {r.emprunteur} — {r.titre} — retour prévu {r.date_retour_prevue}":r.id for r in active.itertuples()}
-                chosen=st.selectbox("Prêt à retourner",list(labels)); retour=st.date_input("Date réelle de retour",date.today(),key="return_date_new")
-                if st.button("↩️ Valider le retour",type="primary"):
-                    lid=labels[chosen]; iid=scalar("SELECT item_id FROM loans WHERE id=?",(lid,))
-                    q("UPDATE loans SET date_retour_reelle=?,statut='Retourné' WHERE id=?",(str(retour),lid)); q("UPDATE library_items SET disponibles=disponibles+1 WHERE id=?",(iid,))
-                    st.success("Retour enregistré."); st.rerun()
-            else: st.info("Aucun prêt en cours.")
+            st.success("Document IST enregistré."); st.rerun()
+    data=df("SELECT id,titre,auteurs,annee,type_document,thematique,reference,statut FROM documents ORDER BY annee DESC,id DESC")
+    st.dataframe(data,use_container_width=True,hide_index=True)
+    export_buttons(data,"documentation_ist","Documentation IST CRA/ISRA")
 
 
 def render_visitors():
@@ -2521,10 +2549,14 @@ def render_profile():
 
 def render_scientific_results():
     st.header("🔬 Résultat scientifique")
-    st.caption("Capitalisation structurée des productions scientifiques et des documents de transfert.")
-    t1,t2,t3,t4,t5=st.tabs(["🧾 Fiche technique","🎓 Mémoire","🎓 Thèse","📑 Rapport","📰 Publication scientifique"])
-    result_types={"🧾 Fiche technique":"Fiche technique","🎓 Mémoire":"Mémoire","🎓 Thèse":"Thèse","📑 Rapport":"Rapport"}
-    for tab,label in [(t1,"Fiche technique"),(t2,"Mémoire"),(t3,"Thèse"),(t4,"Rapport")]:
+    st.caption("Résultats, publications, notes et documentation IST regroupés dans des onglets indépendants.")
+    tabs = st.tabs([
+        "🧾 Fiche technique", "🎓 Mémoire", "🎓 Thèse", "📑 Rapport",
+        "📰 Publication scientifique", "🗒️ Note politique", "📋 Note de synthèse", "📄 Documentation IST"
+    ])
+    result_types = ["Fiche technique", "Mémoire", "Thèse", "Rapport"]
+
+    for tab, label in zip(tabs[:4], result_types):
         with tab:
             with st.form(f"scientific_{label.replace(' ','_')}"):
                 c1,c2,c3=st.columns(3)
@@ -2538,29 +2570,43 @@ def render_scientific_results():
                 else:
                     path=save_uploaded(fichier,"resultats_scientifiques")
                     q("""INSERT INTO scientific_results(type_resultat,titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,fichier,lien,statut,observations)
-                         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(label,titre,auteurs,annee,domaine,projet,resume,mots,public_cible,reference,path,lien,statut,observations)); st.success(f"{label} enregistré."); st.rerun()
+                         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(label,titre,auteurs,annee,domaine,projet,resume,mots,public_cible,reference,path,lien,statut,observations))
+                    st.success(f"{label} enregistré."); st.rerun()
             data=df("SELECT id,type_resultat,titre,auteurs,annee,domaine,projet,reference,statut,lien FROM scientific_results WHERE type_resultat=? ORDER BY annee DESC,id DESC",(label,))
-            st.dataframe(data,use_container_width=True,hide_index=True); export_buttons(data,f"{label.lower().replace(' ','_')}",label)
-    with t5:
+            st.dataframe(data,use_container_width=True,hide_index=True)
+            export_buttons(data,f"{label.lower().replace(' ','_')}",label)
+
+    # Onglet Publication scientifique sans sous-onglets : vue globale de toutes les publications.
+    with tabs[4]:
         st.subheader("📰 Publication scientifique")
-        pubtab1,pubtab2=st.tabs(["Note politique","Note de synthèse"])
-        for ptab,ptype in [(pubtab1,"Note politique"),(pubtab2,"Note de synthèse")]:
-            with ptab:
-                with st.form(f"publication_{ptype.replace(' ','_')}"):
-                    c1,c2,c3=st.columns(3)
-                    titre=c1.text_input("Titre *"); auteurs=c2.text_input("Auteur(s)"); annee=c3.number_input("Année",1900,2100,value=date.today().year)
-                    c1,c2,c3=st.columns(3); domaine=c1.text_input("Domaine"); projet=c2.text_input("Projet"); public_cible=c3.text_input("Public cible")
-                    resume=st.text_area("Résumé"); mots=c1.text_input("Mots-clés"); reference=c2.text_input("Référence"); lien=c3.text_input("Lien")
-                    fichier=None; statut=st.selectbox("Statut",["Disponible","En préparation","Archivé"]); observations=st.text_area("Observations")
-                    ok=st.form_submit_button("💾 Enregistrer",type="primary")
-                if ok:
-                    if not titre.strip(): st.error("Le titre est obligatoire.")
-                    else:
-                        path=save_uploaded(fichier,"publications_scientifiques")
-                        q("""INSERT INTO scientific_publications(type_publication,titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,fichier,lien,statut,observations)
-                             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(ptype,titre,auteurs,annee,domaine,projet,resume,mots,public_cible,reference,path,lien,statut,observations)); st.success(f"{ptype} enregistrée."); st.rerun()
-                data=df("SELECT id,type_publication,titre,auteurs,annee,domaine,projet,reference,statut,lien FROM scientific_publications WHERE type_publication=? ORDER BY annee DESC,id DESC",(ptype,))
-                st.dataframe(data,use_container_width=True,hide_index=True); export_buttons(data,ptype.lower().replace(' ','_'),ptype)
+        st.caption("Vue d'ensemble des notes politiques et notes de synthèse. La création de chaque type se fait dans son propre onglet.")
+        publications=df("SELECT id,type_publication,titre,auteurs,annee,domaine,projet,reference,statut,lien FROM scientific_publications ORDER BY annee DESC,id DESC")
+        st.dataframe(publications,use_container_width=True,hide_index=True)
+        export_buttons(publications,"publications_scientifiques","Toutes les publications scientifiques CRA/ISRA")
+
+    for tab, ptype in [(tabs[5], "Note politique"), (tabs[6], "Note de synthèse")]:
+        with tab:
+            st.subheader("🗒️ " + ptype if ptype == "Note politique" else "📋 " + ptype)
+            with st.form(f"publication_{ptype.replace(' ','_')}"):
+                c1,c2,c3=st.columns(3)
+                titre=c1.text_input("Titre *"); auteurs=c2.text_input("Auteur(s)"); annee=c3.number_input("Année",1900,2100,value=date.today().year)
+                c1,c2,c3=st.columns(3); domaine=c1.text_input("Domaine"); projet=c2.text_input("Projet"); public_cible=c3.text_input("Public cible")
+                resume=st.text_area("Résumé"); mots=c1.text_input("Mots-clés"); reference=c2.text_input("Référence"); lien=c3.text_input("Lien")
+                fichier=None; statut=st.selectbox("Statut",["Disponible","En préparation","Archivé"]); observations=st.text_area("Observations")
+                ok=st.form_submit_button("💾 Enregistrer",type="primary")
+            if ok:
+                if not titre.strip(): st.error("Le titre est obligatoire.")
+                else:
+                    path=save_uploaded(fichier,"publications_scientifiques")
+                    q("""INSERT INTO scientific_publications(type_publication,titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,fichier,lien,statut,observations)
+                         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(ptype,titre,auteurs,annee,domaine,projet,resume,mots,public_cible,reference,path,lien,statut,observations))
+                    st.success(f"{ptype} enregistrée."); st.rerun()
+            data=df("SELECT id,type_publication,titre,auteurs,annee,domaine,projet,reference,statut,lien FROM scientific_publications WHERE type_publication=? ORDER BY annee DESC,id DESC",(ptype,))
+            st.dataframe(data,use_container_width=True,hide_index=True)
+            export_buttons(data,ptype.lower().replace(' ','_'),ptype)
+
+    with tabs[7]:
+        render_documentation_ist()
 
 
 def render_reports():
@@ -2568,7 +2614,7 @@ def render_reports():
     st.header("📊 Rapports, statistiques et exports")
     st.caption(
         "Rapport premium global aligné sur l'organisation actuelle : "
-        "Communication • Documentations • Résultat scientifique • Visiteurs • Valorisation chercheurs. "
+        "Communication • Documentations (Biblio, Consultations, Personnes, Prêts) • Résultat scientifique (publications et Documentation IST) • Visiteurs • Valorisation chercheurs. "
         "Toutes les données déjà enregistrées sont reprises, y compris les anciennes saisies."
     )
 
@@ -2777,6 +2823,8 @@ def render_reports():
         "Personnes": people,
         "Résultats scientifiques": scientific,
         "Publications scientifiques": publications,
+        "Notes politiques": publications[publications["type_publication"] == "Note politique"].copy() if not publications.empty and "type_publication" in publications.columns else pd.DataFrame(columns=publications.columns),
+        "Notes de synthèse": publications[publications["type_publication"] == "Note de synthèse"].copy() if not publications.empty and "type_publication" in publications.columns else pd.DataFrame(columns=publications.columns),
         "Visiteurs": visits,
         "Profils chercheurs": profiles,
         "Valorisation chercheurs": research_data,
@@ -2851,28 +2899,26 @@ def render_reports():
         st.dataframe(formats, use_container_width=True, hide_index=True)
 
     with st.expander("📚 03 — Documentations"):
-        st.dataframe(
-            documents,
-            use_container_width=True,
-            hide_index=True,
-        )
-        st.dataframe(
-            library,
-            use_container_width=True,
-            hide_index=True,
-        )
+        st.markdown("**📚 Biblio**")
+        st.dataframe(library, use_container_width=True, hide_index=True)
+        st.markdown("**📖 Consultations**")
+        st.dataframe(consultations, use_container_width=True, hide_index=True)
+        st.markdown("**👥 Personnes**")
+        st.dataframe(people, use_container_width=True, hide_index=True)
+        st.markdown("**📕 Prêts & retours**")
+        st.dataframe(loans, use_container_width=True, hide_index=True)
 
     with st.expander("🔬 04 — Résultat scientifique"):
-        st.dataframe(
-            scientific,
-            use_container_width=True,
-            hide_index=True,
-        )
-        st.dataframe(
-            publications,
-            use_container_width=True,
-            hide_index=True,
-        )
+        st.markdown("**Résultats scientifiques**")
+        st.dataframe(scientific, use_container_width=True, hide_index=True)
+        st.markdown("**Publication scientifique — toutes les publications**")
+        st.dataframe(publications, use_container_width=True, hide_index=True)
+        st.markdown("**🗒️ Note politique**")
+        st.dataframe(report_data["Notes politiques"], use_container_width=True, hide_index=True)
+        st.markdown("**📋 Note de synthèse**")
+        st.dataframe(report_data["Notes de synthèse"], use_container_width=True, hide_index=True)
+        st.markdown("**📄 Documentation IST**")
+        st.dataframe(documents, use_container_width=True, hide_index=True)
 
     with st.expander("👥 05 — Visiteurs"):
         st.dataframe(
@@ -2919,4 +2965,4 @@ elif page == "👤 Profil":
 elif page == "📊 Rapports & exports":
     render_reports()
 
-st.caption("ISRA • CRA — IST et Communication | Organisation : Communication • Documentations • Résultat scientifique | Formats : PDF • Excel • CSV")
+st.caption("ISRA • CRA — IST et Communication | Organisation : Communication • Documentations (Biblio, Consultations, Personnes, Prêts) • Résultat scientifique (publications et Documentation IST) | Formats : PDF • Excel • CSV")
