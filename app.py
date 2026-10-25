@@ -1561,15 +1561,11 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
 
     kpi_order = [
         ("Activités", report_data.get("Activités")),
-        ("Actions de communication", report_data.get("Communication")),
-        ("Presse & médias", report_data.get("Médias")),
-        ("Audiovisuel", report_data.get("Audiovisuel")),
-        ("Compléments de communication — total", pd.concat([report_data.get(k, pd.DataFrame()) for k in ["Communication", "Médias", "Audiovisuel", "Formats"]], ignore_index=True)),
-        ("Documents IST", report_data.get("Documents IST")),
+        ("Compléments de communication — registre unique", report_data.get("Compléments de communication", pd.DataFrame())),
+        ("Publications scientifiques & Documentation IST — registre unique", report_data.get("Publications & Documentation IST", pd.DataFrame())),
         ("Bibliothèque", report_data.get("Bibliothèque")),
         ("Résultats scientifiques", report_data.get("Résultats scientifiques")),
-        ("Publications scientifiques", report_data.get("Publications scientifiques")),
-        ("Résultats scientifiques — total", pd.concat([report_data.get(k, pd.DataFrame()) for k in ["Résultats scientifiques", "Publications scientifiques", "Documents IST"]], ignore_index=True)),
+        ("Résultats scientifiques — total", report_data.get("Résultats scientifiques — regroupés", pd.DataFrame())),
         ("Notes politiques", report_data.get("Notes politiques")),
         ("Notes de synthèse", report_data.get("Notes de synthèse")),
         ("Visiteurs", report_data.get("Visiteurs")),
@@ -1627,7 +1623,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     # ------------------------------------------------------------
     story.extend(_pdf_section_header(
         "02", "COMMUNICATION",
-        "Activités au centre et compléments de communication regroupés dans un même espace : actions, presse et médias, audiovisuel et formats. Les tableaux détaillés restent distincts dans le rapport.",
+        "Activités au centre et un registre unique de compléments de communication réunissant actions, médias, audiovisuel et formats.",
         section
     ))
 
@@ -1674,10 +1670,11 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
 
     communication_sections = [
         ("2.1", "Activités — centre de Communication", "Toutes les activités déjà enregistrées dans la plateforme. Elles constituent le centre de l'espace Communication.", activities_pdf),
-        ("2.2", "Actions de communication", "Toutes les actions de diffusion et de publication enregistrées.", communication_pdf),
-        ("2.3", "Presse & médias", "Toutes les interventions presse et médias enregistrées, avec média, journaliste, sujet, personne interviewée et informations de suivi.", media_pdf),
-        ("2.4", "Audiovisuel", "Toutes les productions audiovisuelles enregistrées.", audiovisual_pdf),
-        ("2.5", "Formats de communication", "Référentiel des formats et usages enregistrés.", formats_pdf),
+        ("2.2", "Compléments de communication — registre unique", "Tableau unifié réunissant actions de communication, presse et médias, productions audiovisuelles et formats.", _pdf_report_view(
+            report_data.get("Compléments de communication"),
+            ["Origine", "categorie", "titre", "type", "date", "canal", "responsable", "lien", "observations"],
+            {"Origine":"Source", "categorie":"Catégorie", "titre":"Titre / contenu", "type":"Type", "date":"Date", "canal":"Canal / thème", "responsable":"Responsable / journaliste", "lien":"Lien web", "observations":"Observations"},
+        )),
     ]
 
     for num, title, desc, frame in communication_sections:
@@ -1735,18 +1732,15 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
         ("4.1", "Documents scientifiques",
          "Fiches techniques, mémoires, thèses, rapports et autres résultats.",
          report_data.get("Résultats scientifiques")),
-        ("4.2", "Publication scientifique",
-         "Vue d'ensemble de toutes les publications scientifiques.",
-         report_data.get("Publications scientifiques")),
+        ("4.2", "Publications scientifiques & Documentation IST — registre unique",
+         "Registre combiné des publications scientifiques et des ressources IST, présenté comme un contenu unique.",
+         report_data.get("Publications & Documentation IST")),
         ("4.3", "Note politique",
          "Notes politiques enregistrées dans le registre des publications.",
          report_data.get("Notes politiques")),
         ("4.4", "Note de synthèse",
          "Notes de synthèse enregistrées dans le registre des publications.",
          report_data.get("Notes de synthèse")),
-        ("4.5", "Documentation IST",
-         "Recherche, veille, ressources documentaires et fonds IST.",
-         report_data.get("Documents IST")),
     ]
 
     for num, title, desc, frame in scientific_sections:
@@ -2029,12 +2023,8 @@ def render_dashboard():
         ("Activités", scalar("SELECT COUNT(*) FROM activities")),
         ("Participants", scalar("SELECT COUNT(*) FROM participants")),
         ("Personnes", scalar("SELECT COUNT(*) FROM people")),
-        ("Actions de communication", scalar("SELECT COUNT(*) FROM communications")),
-        ("Presse & médias", scalar("SELECT COUNT(*) FROM media")),
-        ("Productions audiovisuelles", scalar("SELECT COUNT(*) FROM audiovisual")),
-        ("Formats de communication", scalar("SELECT COUNT(*) FROM communication_formats")),
-        ("Compléments de communication — total", scalar("SELECT (SELECT COUNT(*) FROM communications) + (SELECT COUNT(*) FROM media) + (SELECT COUNT(*) FROM audiovisual) + (SELECT COUNT(*) FROM communication_formats)")),
-        ("Documents IST", scalar("SELECT COUNT(*) FROM documents")),
+        ("Compléments de communication — registre unique", scalar("SELECT (SELECT COUNT(*) FROM communications) + (SELECT COUNT(*) FROM media) + (SELECT COUNT(*) FROM audiovisual) + (SELECT COUNT(*) FROM communication_formats)")),
+        ("Publications scientifiques & Documentation IST", scalar("SELECT (SELECT COUNT(*) FROM documents) + (SELECT COUNT(*) FROM scientific_publications WHERE type_publication NOT IN ('Note politique','Note de synthèse'))")),
         ("Documents bibliothèque", scalar("SELECT COUNT(*) FROM library_items")),
         ("Consultations", scalar("SELECT COUNT(*) FROM consultations")),
         ("Résultats scientifiques", scalar("SELECT COUNT(*) FROM scientific_results")),
@@ -2274,41 +2264,95 @@ def _communication_formats():
 
 
 def render_communication():
+    """Espace Communication avec un contenu unifié pour toutes les ressources de communication."""
     st.header("📣 Communication")
-    st.caption("Centre principal de communication : les activités constituent le cœur de cet espace et alimentent les actions, médias et productions.")
+    st.caption("Les activités restent le centre de pilotage. Toutes les actions, médias, productions audiovisuelles et formats sont saisis et consultés dans un registre unique.")
     st.markdown(
-        '<div class="section-banner"><span>ACTIVITÉS • COMMUNICATION</span>'
-        '<strong>Les activités sont le centre de pilotage de cet onglet</strong></div>',
+        '<div class="section-banner"><span>COMMUNICATION</span>'
+        '<strong>Activités • Actions • Médias • Audiovisuel • Formats</strong></div>',
         unsafe_allow_html=True,
     )
-
-    # L'activité est volontairement intégrée au centre Communication.
-    # Il n'existe plus de rubrique/navigation autonome « Activités ».
     st.markdown("## 🗓️ Activités — centre de Communication")
-    st.caption("Toutes les activités enregistrées sont gérées ici. Elles peuvent ensuite être liées aux actions de communication.")
+    st.caption("Toutes les activités enregistrées sont gérées ici. Elles peuvent être liées aux actions de communication.")
     render_activities()
 
-    st.markdown("## 📚 Compléments de communication")
-    st.caption(
-        "Espace unique regroupant les actions de communication, les relations avec les médias, "
-        "les productions audiovisuelles et le référentiel des formats. Les formulaires, tableaux "
-        "et exports de chaque rubrique sont conservés."
-    )
-    st.markdown(
-        '<div class="section-banner"><span>COMPLÉMENTS DE COMMUNICATION</span>'
-        '<strong>Actions • Presse & médias • Audiovisuel • Formats</strong></div>',
-        unsafe_allow_html=True,
-    )
-    # Un seul groupe « Compléments de communication » : les quatre rubriques
-    # restent disponibles sans créer d'onglets ou d'espaces de navigation séparés.
-    with st.expander("📣 Actions de communication et diffusion", expanded=True):
-        _communication_actions()
-    with st.expander("📰 Presse et médias", expanded=False):
-        _communication_media()
-    with st.expander("🎥 Productions audiovisuelles", expanded=False):
-        _communication_audiovisual()
-    with st.expander("🧩 Formats de communication et de production", expanded=False):
-        _communication_formats()
+    st.markdown("## 📚 Compléments de communication — registre unique")
+    st.caption("Un seul formulaire et un seul tableau réunissent les actions de communication, la presse et les médias, les productions audiovisuelles et les formats. Choisissez le type de contenu puis renseignez les informations utiles ; le lien web est privilégié.")
+    acts=df("SELECT id,reference,titre FROM activities ORDER BY date_activite DESC")
+    actmap={f"{r.reference} — {r.titre}":r.id for r in acts.itertuples()} if not acts.empty else {}
+    with st.form("communication_contenu_unique_form"):
+        categorie=st.selectbox("Type de contenu",["Action de communication","Presse et médias","Production audiovisuelle","Format de communication"])
+        c1,c2,c3=st.columns(3)
+        titre=c1.text_input("Titre / nom du contenu *")
+        type_contenu=c2.selectbox("Type / format",["Affiche","Invitation","Communiqué","Dossier de presse","Article","Reportage","Interview","Photographie","Vidéo","Film","Documentaire","Brochure","Plaquette","Kakemono","Publication web","Émission","Conférence de presse","Autre"])
+        date_contenu=c3.date_input("Date",date.today())
+        c1,c2,c3=st.columns(3)
+        activity_label=c1.selectbox("Activité liée (facultatif)",["—"]+list(actmap))
+        canal=c2.selectbox("Canal / média / catégorie",["Site web","Facebook","LinkedIn","YouTube","WhatsApp","Radio","Télévision","Presse écrite","Presse en ligne","Magazine","Communication","Média","Audiovisuel","Documentation","Scientifique","Numérique","Événementiel","Autre"])
+        statut=c3.selectbox("Statut",["Prévu","En préparation","En production","Terminé","Diffusé","Disponible","Archivé"])
+        c1,c2,c3=st.columns(3)
+        contact=c1.text_input("Journaliste / responsable / personne interviewée")
+        theme=c2.text_input("Sujet / thème")
+        lieu=c3.text_input("Lieu")
+        c1,c2,c3=st.columns(3)
+        duree=c1.text_input("Durée / spécification (facultatif)")
+        nom_format=c2.text_input("Nom du format (si applicable)")
+        norme=c3.text_input("Norme / dimensions (si applicable)")
+        lien=st.text_input("🔗 Lien web / lien de diffusion / référence",placeholder="https://…")
+        c1,c2,c3=st.columns(3)
+        vues=c1.number_input("Vues",0,step=1)
+        reactions=c2.number_input("Réactions",0,step=1)
+        partages=c3.number_input("Partages",0,step=1)
+        c1,c2=st.columns(2)
+        commentaires=c1.number_input("Commentaires",0,step=1)
+        telechargements=c2.number_input("Téléchargements",0,step=1)
+        description=st.text_area("Description / usage recommandé")
+        observations=st.text_area("Observations")
+        ok=st.form_submit_button("💾 Enregistrer dans le registre de communication",type="primary")
+    if ok:
+        if not titre.strip():
+            st.error("Le titre ou nom du contenu est obligatoire.")
+        else:
+            try:
+                if categorie == "Action de communication":
+                    q("""INSERT INTO communications(activity_id,titre,type_action,plateforme,date_publication,lien,vues,reactions,commentaires,partages,telechargements,observations)
+                         VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",(actmap.get(activity_label),titre,type_contenu,canal,str(date_contenu),lien,vues,reactions,commentaires,partages,telechargements,observations))
+                elif categorie == "Presse et médias":
+                    q("""INSERT INTO media(media_name,media_type,journaliste,personne_interviewee,sujet,date_intervention,lieu,type_intervention,lien,observations)
+                         VALUES(?,?,?,?,?,?,?,?,?,?)""",(titre,canal,contact,contact,theme,str(date_contenu),lieu,type_contenu,lien,observations))
+                elif categorie == "Production audiovisuelle":
+                    q("""INSERT INTO audiovisual(titre,type_production,date_production,lieu,theme,interviewes,duree,responsable,statut,lien,fichier_original,observations)
+                         VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",(titre,type_contenu,str(date_contenu),lieu,theme,contact,duree,contact,statut,lien,None,observations))
+                else:
+                    q("""INSERT INTO communication_formats(categorie,nom_format,description,usage_recommande,norme,lien_reference,observations)
+                         VALUES(?,?,?,?,?,?,?)""",(canal,nom_format.strip() or titre,description,description,norme,lien,observations))
+                st.success("Contenu enregistré dans le registre unique de communication.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Impossible d'enregistrer le contenu : {exc}")
+
+    # Vue normalisée unique : les tables historiques restent utilisées en arrière-plan
+    # pour préserver la compatibilité avec la base de données existante.
+    data=df("""
+        SELECT id, 'Action de communication' AS categorie, titre, type_action AS type,
+               date_publication::text AS date, plateforme AS canal, NULL::text AS responsable,
+               lien, observations FROM communications
+        UNION ALL
+        SELECT id, 'Presse et médias' AS categorie, media_name AS titre,
+               type_intervention AS type, date_intervention::text AS date,
+               media_type AS canal, journaliste AS responsable, lien, observations FROM media
+        UNION ALL
+        SELECT id, 'Production audiovisuelle' AS categorie, titre, type_production AS type,
+               date_production::text AS date, theme AS canal, responsable, lien, observations FROM audiovisual
+        UNION ALL
+        SELECT id, 'Format de communication' AS categorie, nom_format AS titre,
+               categorie AS type, NULL::text AS date, norme AS canal,
+               NULL::text AS responsable, lien_reference AS lien, observations FROM communication_formats
+        ORDER BY date DESC NULLS LAST, titre
+    """)
+    st.subheader("📋 Registre unique — tous les contenus de communication")
+    st.dataframe(data,use_container_width=True,hide_index=True)
+    export_buttons(data,"complements_communication_unifies","Compléments de communication — registre unique CRA/ISRA")
 
 def render_documentations():
     """Espace Documentation organisé en quatre onglets métier indépendants."""
@@ -2636,72 +2680,61 @@ def render_scientific_results():
         render_result_form("Rapport")
 
     with tab_publications_ist:
-        st.subheader("📰 Publications scientifiques")
-        st.caption("Enregistrez les références bibliographiques et leurs liens web ou DOI.")
-        with st.form("publication_scientifique_form"):
+        st.subheader("📰 Publications scientifiques & Documentation IST — registre unique")
+        st.caption("Un seul formulaire et un seul tableau regroupent les publications scientifiques et les ressources IST. Le type de ressource détermine le registre historique dans lequel les données sont conservées.")
+        with st.form("publications_ist_contenu_unique_form"):
+            origine=st.selectbox("Nature de la ressource",["Publication scientifique","Documentation IST"])
             c1,c2,c3=st.columns(3)
-            titre=c1.text_input("Titre de la publication *")
-            auteurs=c2.text_input("Auteur(s)")
-            annee=c3.number_input("Année de publication",1900,2100,value=date.today().year)
+            titre=c1.text_input("Titre *",key="pubist_titre")
+            auteurs=c2.text_input("Auteur(s)",key="pubist_auteurs")
+            annee=c3.number_input("Année",1900,2100,value=date.today().year,key="pubist_annee")
             c1,c2,c3=st.columns(3)
-            type_publication=c1.selectbox("Type de publication",["Article scientifique","Ouvrage","Chapitre d’ouvrage","Communication scientifique","Actes de conférence","Revue / bulletin","Document technique","Autre"])
-            domaine=c2.text_input("Domaine scientifique")
-            projet=c3.text_input("Projet associé")
-            resume=st.text_area("Résumé")
+            type_ressource=c1.selectbox("Type de document",["Article scientifique","Ouvrage","Chapitre d’ouvrage","Communication scientifique","Actes de conférence","Rapport","Mémoire","Thèse","Document technique","Guide","Brochure","Plaquette","Revue / bulletin","Autre"],key="pubist_type")
+            domaine=c2.text_input("Domaine / thématique",key="pubist_domaine")
+            projet=c3.text_input("Projet associé",key="pubist_projet")
             c1,c2,c3=st.columns(3)
-            mots=c1.text_input("Mots-clés")
-            public_cible=c2.text_input("Public cible")
-            reference=c3.text_input("Référence bibliographique / DOI")
-            lien=st.text_input("Lien web de la publication (URL)",placeholder="https://…")
-            statut=st.selectbox("Statut",["Disponible","En préparation","Archivé"])
-            observations=st.text_area("Observations")
-            ok=st.form_submit_button("💾 Enregistrer la publication scientifique",type="primary")
+            mots=c1.text_input("Mots-clés",key="pubist_mots")
+            public_cible=c2.text_input("Public cible / chercheur associé",key="pubist_public")
+            langue=c3.text_input("Langue",value="Français",key="pubist_langue")
+            resume=st.text_area("Résumé",key="pubist_resume")
+            c1,c2,c3=st.columns(3)
+            reference=c1.text_input("Référence bibliographique / DOI",key="pubist_reference")
+            pages=c2.number_input("Pages (si applicable)",0,step=1,key="pubist_pages")
+            statut=c3.selectbox("Statut",["Disponible","À vérifier","En préparation","Archivé"],key="pubist_statut")
+            lien=st.text_input("🔗 Lien web / DOI / lien institutionnel",placeholder="https://…",key="pubist_lien")
+            observations=st.text_area("Observations",key="pubist_observations")
+            ok=st.form_submit_button("💾 Enregistrer dans le registre scientifique & IST",type="primary")
         if ok:
             if not titre.strip():
-                st.error("Le titre de la publication est obligatoire.")
-            else:
-                q("""INSERT INTO scientific_publications(type_publication,titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,fichier,lien,statut,observations)
-                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                  (type_publication,titre,auteurs,annee,domaine,projet,resume,mots,public_cible,reference,None,lien,statut,observations))
-                st.success("Publication scientifique enregistrée."); st.rerun()
-        publications=df("SELECT id,type_publication,titre,auteurs,annee,domaine,projet,reference,statut,lien FROM scientific_publications WHERE type_publication NOT IN ('Note politique','Note de synthèse') ORDER BY annee DESC,id DESC")
-        st.dataframe(publications,use_container_width=True,hide_index=True)
-        export_buttons(publications,"publications_scientifiques","Publications scientifiques CRA/ISRA")
-
-        st.divider()
-        st.subheader("📄 Documentation IST")
-        st.caption("Recherche, veille, ressources documentaires et fonds IST. Utilisez un lien web plutôt qu'une pièce jointe.")
-        with st.form("doc_form_new"):
-            c1,c2,c3=st.columns(3)
-            doc_titre=c1.text_input("Titre *",key="ist_titre")
-            doc_auteurs=c2.text_input("Auteur(s)",key="ist_auteurs")
-            doc_annee=c3.number_input("Année",1900,2100,value=date.today().year,key="ist_annee")
-            c1,c2,c3=st.columns(3)
-            doc_type=c1.selectbox("Type",["Article scientifique","Mémoire","Thèse","Rapport","Communication","Publication","Document technique","Guide","Brochure","Plaquette","Revue","Bulletin","Autre"],key="ist_type")
-            theme=c2.text_input("Thématique",key="ist_theme")
-            doc_mots=c3.text_input("Mots-clés",key="ist_mots")
-            chercheur=st.text_input("Chercheur associé",key="ist_chercheur")
-            doc_projet=st.text_input("Projet",key="ist_projet")
-            doc_resume=st.text_area("Résumé",key="ist_resume")
-            c1,c2,c3=st.columns(3)
-            langue=c1.text_input("Langue",value="Français",key="ist_langue")
-            pages=c2.number_input("Pages",0,step=1,key="ist_pages")
-            doc_reference=c3.text_input("Référence",key="ist_reference")
-            doc_lien=st.text_input("Lien web (URL)",placeholder="https://…",key="ist_lien")
-            doc_statut=st.selectbox("Statut",["Disponible","À vérifier","Archivé"],key="ist_statut")
-            doc_observations=st.text_area("Observations",key="ist_observations")
-            doc_ok=st.form_submit_button("💾 Ajouter le document IST",type="primary")
-        if doc_ok:
-            if not doc_titre.strip():
                 st.error("Le titre est obligatoire.")
             else:
-                q("""INSERT INTO documents(titre,auteurs,annee,type_document,thematique,mots_cles,chercheur_associe,projet,resume,langue,pages,reference,fichier,lien,statut,observations)
-                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                  (doc_titre,doc_auteurs,doc_annee,doc_type,theme,doc_mots,chercheur,doc_projet,doc_resume,langue,pages,doc_reference,None,doc_lien,doc_statut,doc_observations))
-                st.success("Document IST enregistré."); st.rerun()
-        documents_ist=df("SELECT id,titre,auteurs,annee,type_document,thematique,reference,statut,lien FROM documents ORDER BY annee DESC,id DESC")
-        st.dataframe(documents_ist,use_container_width=True,hide_index=True)
-        export_buttons(documents_ist,"documentation_ist","Documentation IST CRA/ISRA")
+                try:
+                    if origine == "Publication scientifique":
+                        q("""INSERT INTO scientific_publications(type_publication,titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,fichier,lien,statut,observations)
+                             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(type_ressource,titre,auteurs,annee,domaine,projet,resume,mots,public_cible,reference,None,lien,statut,observations))
+                    else:
+                        q("""INSERT INTO documents(titre,auteurs,annee,type_document,thematique,mots_cles,chercheur_associe,projet,resume,langue,pages,reference,fichier,lien,statut,observations)
+                             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(titre,auteurs,annee,type_ressource,domaine,mots,public_cible,projet,resume,langue,pages,reference,None,lien,statut,observations))
+                    st.success("Ressource enregistrée dans le registre unique.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Impossible d'enregistrer la ressource : {exc}")
+
+        # Normalisation des deux registres dans un tableau unique visible et exportable.
+        pubs=df("""SELECT id, 'Publication scientifique' AS origine, type_publication AS type,
+                       titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,lien,statut,observations
+                    FROM scientific_publications
+                    WHERE type_publication NOT IN ('Note politique','Note de synthèse')""")
+        docs=df("""SELECT id, 'Documentation IST' AS origine, type_document AS type,
+                       titre,auteurs,annee,thematique AS domaine,projet,resume,mots_cles,
+                       chercheur_associe AS public_cible,reference,lien,statut,observations
+                    FROM documents""")
+        combined=pd.concat([pubs,docs],ignore_index=True,sort=False)
+        if not combined.empty and "annee" in combined.columns:
+            combined=combined.sort_values(by=["annee","titre"],ascending=[False,True],na_position="last")
+        st.subheader("📋 Registre unique — publications et documentation IST")
+        st.dataframe(combined,use_container_width=True,hide_index=True)
+        export_buttons(combined,"publications_documentation_ist","Publications scientifiques & Documentation IST — registre unique CRA/ISRA")
 
     def render_publication_note(ptype, icon):
         st.subheader(f"{icon} {ptype}")
@@ -2906,6 +2939,66 @@ def render_reports():
         ORDER BY rv.date_action, rv.id
     """, (str(start), str(end)))
 
+    # Registre combiné normalisé : une seule structure de colonnes pour les deux sources.
+    def _normalized_resource_frame(frame, origin, mapping):
+        columns = ["Origine", "Type", "Titre", "Auteurs", "Année", "Domaine / thématique", "Projet",
+                   "Résumé", "Mots-clés", "Public cible / chercheur associé", "Langue", "Pages",
+                   "Référence / DOI", "Lien web", "Statut", "Observations"]
+        if frame is None or frame.empty:
+            return pd.DataFrame(columns=columns)
+        result = pd.DataFrame(index=frame.index)
+        result["Origine"] = origin
+        for target, source in mapping.items():
+            result[target] = frame[source] if source in frame.columns else ""
+        for col in columns:
+            if col not in result.columns:
+                result[col] = ""
+        return result[columns]
+
+    publications_sans_notes = publications[
+        ~publications["type_publication"].isin(["Note politique", "Note de synthèse"])
+    ].copy() if not publications.empty and "type_publication" in publications.columns else pd.DataFrame()
+    publications_ist = pd.concat([
+        _normalized_resource_frame(publications_sans_notes, "Publication scientifique", {
+            "Type":"type_publication", "Titre":"titre", "Auteurs":"auteurs", "Année":"annee",
+            "Domaine / thématique":"domaine", "Projet":"projet", "Résumé":"resume", "Mots-clés":"mots_cles",
+            "Public cible / chercheur associé":"public_cible", "Référence / DOI":"reference", "Lien web":"lien",
+            "Statut":"statut", "Observations":"observations"}),
+        _normalized_resource_frame(documents, "Documentation IST", {
+            "Type":"type_document", "Titre":"titre", "Auteurs":"auteurs", "Année":"annee",
+            "Domaine / thématique":"thematique", "Projet":"projet", "Résumé":"resume", "Mots-clés":"mots_cles",
+            "Public cible / chercheur associé":"chercheur_associe", "Langue":"langue", "Pages":"pages",
+            "Référence / DOI":"reference", "Lien web":"lien", "Statut":"statut", "Observations":"observations"}),
+    ], ignore_index=True, sort=False)
+
+    def _normalized_communication_frame(frame, origin, mapping):
+        columns = ["Origine", "categorie", "titre", "type", "date", "canal", "responsable", "lien", "observations"]
+        if frame is None or frame.empty:
+            return pd.DataFrame(columns=columns)
+        result = pd.DataFrame(index=frame.index)
+        result["Origine"] = origin
+        for target, source in mapping.items():
+            result[target] = frame[source] if source in frame.columns else ""
+        for col in columns:
+            if col not in result.columns:
+                result[col] = ""
+        return result[columns]
+
+    communication_unifiee = pd.concat([
+        _normalized_communication_frame(communications, "Action de communication", {
+            "categorie":"categorie", "titre":"titre", "type":"type_action", "date":"date_publication",
+            "canal":"plateforme", "responsable":"", "lien":"lien", "observations":"observations"}),
+        _normalized_communication_frame(media_df, "Presse et médias", {
+            "categorie":"media_type", "titre":"media_name", "type":"type_intervention", "date":"date_intervention",
+            "canal":"sujet", "responsable":"journaliste", "lien":"lien", "observations":"observations"}),
+        _normalized_communication_frame(av, "Production audiovisuelle", {
+            "categorie":"type_production", "titre":"titre", "type":"type_production", "date":"date_production",
+            "canal":"theme", "responsable":"responsable", "lien":"lien", "observations":"observations"}),
+        _normalized_communication_frame(formats, "Format de communication", {
+            "categorie":"categorie", "titre":"nom_format", "type":"categorie", "date":"", "canal":"norme",
+            "responsable":"", "lien":"lien_reference", "observations":"observations"}),
+    ], ignore_index=True, sort=False)
+
     # ============================================================
     # INDICATEURS — données de la période sélectionnée
     # ============================================================
@@ -2920,15 +3013,11 @@ def render_reports():
 
     vals = [
         ("Activités", len(activities)),
-        ("Actions de communication", len(communications)),
-        ("Presse & médias", len(media_df)),
-        ("Audiovisuel", len(av)),
-        ("Compléments de communication — total", len(communications) + len(media_df) + len(av) + len(formats)),
-        ("Documents IST", len(documents)),
+        ("Compléments de communication — registre unique", len(communication_unifiee)),
+        ("Publications scientifiques & Documentation IST — registre unique", len(publications_ist)),
         ("Consultations", len(consultations)),
         ("Prêts", len(loans)),
         ("Résultats scientifiques", len(scientific)),
-        ("Publications scientifiques", len(publications)),
         ("Résultats scientifiques — total", len(scientific) + len(publications) + len(documents)),
         ("Visiteurs", len(visits)),
         ("Valorisations", len(research_data)),
@@ -2949,13 +3038,9 @@ def render_reports():
         "Médias": media_df,
         "Audiovisuel": av,
         "Formats": formats,
-        "Compléments de communication": pd.concat([
-            frame.assign(Origine=label) for label, frame in [
-                ("Actions de communication", communications), ("Presse et médias", media_df),
-                ("Productions audiovisuelles", av), ("Formats", formats)
-            ]
-        ], ignore_index=True, sort=False),
+        "Compléments de communication": communication_unifiee,
         "Documents IST": documents,
+        "Publications & Documentation IST": publications_ist,
         "Bibliothèque": library,
         "Consultations": consultations,
         "Prêts": loans,
@@ -2998,10 +3083,14 @@ def render_reports():
     else:
         st.error("Le module ReportLab n'est pas disponible : installez reportlab.")
 
-    # Excel complet conservant toutes les données
+    # Le classeur reprend l'architecture unifiée : les registres historiques restent
+    # disponibles dans report_data pour les calculs et le PDF, mais ne sont pas dupliqués
+    # en feuilles séparées lorsque leur contenu est déjà rassemblé dans un registre unique.
+    _legacy_separate_sheets = {"Communication", "Médias", "Audiovisuel", "Formats", "Publications scientifiques", "Documents IST"}
+    excel_report_data = {name: frame for name, frame in report_data.items() if name not in _legacy_separate_sheets}
     st.download_button(
         "⬇️ Télécharger le rapport Excel complet",
-        excel_bytes(report_data),
+        excel_bytes(excel_report_data),
         "rapport_premium_ist_communication_CRA_ISRA.xlsx",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         type="primary",
@@ -3031,19 +3120,8 @@ def render_reports():
             use_container_width=True,
             hide_index=True,
         )
-        st.dataframe(
-            communications,
-            use_container_width=True,
-            hide_index=True,
-        )
-        st.markdown("**📚 Compléments de communication — 📰 Presse & médias**")
-        st.dataframe(media_df, use_container_width=True, hide_index=True)
-        st.markdown("**🎥 Audiovisuel**")
-        st.dataframe(av, use_container_width=True, hide_index=True)
-        st.markdown("**🧩 Formats de communication**")
-        st.dataframe(formats, use_container_width=True, hide_index=True)
-        with st.expander("📊 Tableau combiné — Compléments de communication", expanded=False):
-            st.dataframe(report_data["Compléments de communication"], use_container_width=True, hide_index=True)
+        st.markdown("**📚 Compléments de communication — registre unique (actions, médias, audiovisuel et formats)**")
+        st.dataframe(report_data["Compléments de communication"], use_container_width=True, hide_index=True)
 
     with st.expander("📚 03 — Documentations"):
         st.markdown("**📚 Biblio**")
@@ -3058,15 +3136,13 @@ def render_reports():
     with st.expander("🔬 04 — Résultats scientifiques"):
         st.markdown("**Documents scientifiques — fiches, mémoires, thèses et rapports**")
         st.dataframe(scientific, use_container_width=True, hide_index=True)
-        st.markdown("**Publication scientifique — toutes les publications**")
-        st.dataframe(publications, use_container_width=True, hide_index=True)
-        st.markdown("**🗒️ Note politique**")
+        st.markdown("**📰 Publications scientifiques & Documentation IST — registre unique**")
+        st.dataframe(report_data["Publications & Documentation IST"], use_container_width=True, hide_index=True)
+        st.markdown("**🗒️ Notes politiques**")
         st.dataframe(report_data["Notes politiques"], use_container_width=True, hide_index=True)
-        st.markdown("**📋 Note de synthèse**")
+        st.markdown("**📋 Notes de synthèse**")
         st.dataframe(report_data["Notes de synthèse"], use_container_width=True, hide_index=True)
-        st.markdown("**📄 Documentation IST**")
-        st.dataframe(documents, use_container_width=True, hide_index=True)
-        with st.expander("📊 Tableau combiné — Résultats scientifiques", expanded=False):
+        with st.expander("📊 Tableau combiné — Résultats scientifiques (toutes catégories)", expanded=False):
             st.dataframe(report_data["Résultats scientifiques — regroupés"], use_container_width=True, hide_index=True)
 
     with st.expander("👥 05 — Visiteurs"):
