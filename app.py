@@ -2576,10 +2576,41 @@ def render_scientific_results():
             st.dataframe(data,use_container_width=True,hide_index=True)
             export_buttons(data,f"{label.lower().replace(' ','_')}",label)
 
-    # Onglet Publication scientifique sans sous-onglets : vue globale de toutes les publications.
+    # Onglet Publication scientifique : formulaire de saisie + vue globale, sans sous-onglets.
     with tabs[4]:
-        st.subheader("📰 Publication scientifique")
-        st.caption("Vue d'ensemble des notes politiques et notes de synthèse. La création de chaque type se fait dans son propre onglet.")
+        st.subheader("📰 Enregistrer une publication scientifique")
+        st.caption("Renseignez les informations bibliographiques et scientifiques, puis retrouvez la publication dans le registre ci-dessous. Les notes politiques et notes de synthèse restent saisies dans leurs onglets dédiés.")
+        with st.form("publication_scientifique_form"):
+            c1,c2,c3=st.columns(3)
+            titre=c1.text_input("Titre de la publication *")
+            auteurs=c2.text_input("Auteur(s)")
+            annee=c3.number_input("Année de publication",1900,2100,value=date.today().year)
+            c1,c2,c3=st.columns(3)
+            type_publication=c1.selectbox("Type de publication",["Article scientifique","Ouvrage","Chapitre d’ouvrage","Communication scientifique","Actes de conférence","Revue / bulletin","Document technique","Autre"])
+            domaine=c2.text_input("Domaine scientifique")
+            projet=c3.text_input("Projet associé")
+            resume=st.text_area("Résumé")
+            c1,c2,c3=st.columns(3)
+            mots=c1.text_input("Mots-clés")
+            public_cible=c2.text_input("Public cible")
+            reference=c3.text_input("Référence bibliographique / DOI")
+            c1,c2=st.columns(2)
+            lien=c1.text_input("Lien web (URL)")
+            fichier=c2.file_uploader("Joindre le fichier de la publication",type=["pdf","doc","docx"])
+            statut=st.selectbox("Statut",["Disponible","En préparation","Archivé"])
+            observations=st.text_area("Observations")
+            ok=st.form_submit_button("💾 Enregistrer la publication scientifique",type="primary")
+        if ok:
+            if not titre.strip():
+                st.error("Le titre de la publication est obligatoire.")
+            else:
+                path=save_uploaded(fichier,"publications_scientifiques")
+                q("""INSERT INTO scientific_publications(type_publication,titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,fichier,lien,statut,observations)
+                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(type_publication,titre,auteurs,annee,domaine,projet,resume,mots,public_cible,reference,path,lien,statut,observations))
+                st.success("Publication scientifique enregistrée.")
+                st.rerun()
+        st.divider()
+        st.subheader("📚 Registre de toutes les publications scientifiques")
         publications=df("SELECT id,type_publication,titre,auteurs,annee,domaine,projet,reference,statut,lien FROM scientific_publications ORDER BY annee DESC,id DESC")
         st.dataframe(publications,use_container_width=True,hide_index=True)
         export_buttons(publications,"publications_scientifiques","Toutes les publications scientifiques CRA/ISRA")
