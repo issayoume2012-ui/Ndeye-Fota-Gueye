@@ -595,7 +595,16 @@ def q(sql, params=(), fetch=False):
     conn = get_conn()
     cur = conn.cursor()
     try:
-        cur.execute(_sql(sql), params)
+        # IMPORTANT : ne pas passer un tuple de paramètres vide à psycopg2.
+        # Avec des requêtes contenant des motifs LIKE tels que '%rapport%',
+        # psycopg2 peut interpréter les signes % comme des marqueurs de format
+        # et lever IndexError: tuple index out of range. Sans paramètres,
+        # exécuter la requête sans second argument préserve les % littéraux.
+        prepared_sql = _sql(sql)
+        if params is None or params == () or params == []:
+            cur.execute(prepared_sql)
+        else:
+            cur.execute(prepared_sql, params)
         if fetch:
             rows = cur.fetchall()
             columns = [d[0] for d in cur.description] if cur.description else []
