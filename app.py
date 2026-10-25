@@ -1595,18 +1595,14 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     # Tableau de synthèse des espaces
     synthesis_rows = [
         ["Espace", "Contenu", "Enregistrements"],
-        ["Communication", "Activités (centre), actions, médias, audiovisuel, formats",
-         str(sum(len(report_data.get(k, pd.DataFrame())) for k in [
-             "Activités", "Communication", "Médias", "Audiovisuel", "Formats"
-         ]))],
+        ["Communication", "Activités (centre) et registre unique des compléments de communication",
+         str(len(report_data.get("Activités", pd.DataFrame())) + len(report_data.get("Compléments de communication", pd.DataFrame())))],
         ["Documentations", "Bibliothèque, consultations, prêts/retours et personnes",
          str(sum(len(report_data.get(k, pd.DataFrame())) for k in [
              "Bibliothèque", "Consultations", "Prêts", "Personnes"
          ]))],
         ["Résultats scientifiques", "Fiches, mémoires, thèses, rapports, publications, notes et Documentation IST",
-         str(sum(len(report_data.get(k, pd.DataFrame())) for k in [
-             "Résultats scientifiques", "Publications scientifiques", "Documents IST"
-         ]))],
+         str(len(report_data.get("Résultats scientifiques", pd.DataFrame())) + len(report_data.get("Publications & Documentation IST", pd.DataFrame())) + len(report_data.get("Notes politiques", pd.DataFrame())) + len(report_data.get("Notes de synthèse", pd.DataFrame())))],
         ["Visiteurs", "Registre des visiteurs",
          str(len(report_data.get("Visiteurs", pd.DataFrame())))],
         ["Valorisation chercheurs", "Profils et actions de valorisation",
@@ -2779,7 +2775,7 @@ def render_reports():
     st.caption(
         "Rapport premium global aligné sur l'organisation actuelle : "
         "Communication • Documentations (Biblio, Consultations, Personnes, Prêts) • Résultats scientifiques (documents, publications, notes et Documentation IST) • Visiteurs • Valorisation chercheurs. "
-        "Toutes les données déjà enregistrées sont reprises, y compris les anciennes saisies."
+        "La période proposée commence en 1900 afin d'inclure l'historique complet par défaut ; les lignes sans date ou année sont également conservées."
     )
 
     st.markdown("""
@@ -2796,7 +2792,7 @@ def render_reports():
     c1, c2 = st.columns(2)
     start = c1.date_input(
         "Du",
-        date(date.today().year, 1, 1),
+        date(1900, 1, 1),
         key="report_start_date",
     )
     end = c2.date_input(
@@ -2815,23 +2811,23 @@ def render_reports():
     # Une activité est incluse si sa période chevauche la période du rapport.
     activities = df(
         "SELECT *, (date_fin - date_activite + 1) AS duree_jours FROM activities "
-        "WHERE date_activite <= ? AND COALESCE(date_fin, date_activite) >= ? "
+        "WHERE (date_activite IS NULL OR (date_activite <= ? AND COALESCE(date_fin, date_activite) >= ?)) "
         "ORDER BY date_activite, id",
         (str(end), str(start)),
     )
 
     communications = df(
-        "SELECT * FROM communications WHERE date_publication BETWEEN ? AND ? "
+        "SELECT * FROM communications WHERE date_publication IS NULL OR date_publication BETWEEN ? AND ? "
         "ORDER BY date_publication NULLS LAST, id",
         (str(start), str(end)),
     )
     media_df = df(
-        "SELECT * FROM media WHERE date_intervention BETWEEN ? AND ? "
+        "SELECT * FROM media WHERE date_intervention IS NULL OR date_intervention BETWEEN ? AND ? "
         "ORDER BY date_intervention NULLS LAST, id",
         (str(start), str(end)),
     )
     av = df(
-        "SELECT * FROM audiovisual WHERE date_production BETWEEN ? AND ? "
+        "SELECT * FROM audiovisual WHERE date_production IS NULL OR date_production BETWEEN ? AND ? "
         "ORDER BY date_production NULLS LAST, id",
         (str(start), str(end)),
     )
@@ -2842,7 +2838,7 @@ def render_reports():
         "SELECT * FROM communication_formats ORDER BY categorie, nom_format"
     )
     documents = df(
-        "SELECT * FROM documents WHERE annee BETWEEN ? AND ? "
+        "SELECT * FROM documents WHERE annee IS NULL OR annee BETWEEN ? AND ? "
         "ORDER BY annee DESC, id DESC",
         (start.year, end.year),
     )
@@ -2855,7 +2851,7 @@ def render_reports():
         "FROM consultations c "
         "LEFT JOIN people p ON p.id=c.person_id "
         "LEFT JOIN library_items i ON i.id=c.item_id "
-        "WHERE c.date_consultation BETWEEN ? AND ? "
+        "WHERE c.date_consultation IS NULL OR c.date_consultation BETWEEN ? AND ? "
         "ORDER BY c.date_consultation, c.id",
         (str(start), str(end)),
     )
@@ -2867,7 +2863,7 @@ def render_reports():
         "FROM loans l "
         "LEFT JOIN people p ON p.id=l.person_id "
         "LEFT JOIN library_items i ON i.id=l.item_id "
-        "WHERE l.date_emprunt BETWEEN ? AND ? "
+        "WHERE l.date_emprunt IS NULL OR l.date_emprunt BETWEEN ? AND ? "
         "ORDER BY l.date_emprunt, l.id",
         (str(start), str(end)),
     )
@@ -2888,22 +2884,22 @@ def render_reports():
         "v.documents_consultes, v.documents_empruntes, v.observations "
         "FROM library_visits v "
         "LEFT JOIN people p ON p.id=v.person_id "
-        "WHERE v.date_visite BETWEEN ? AND ? "
+        "WHERE v.date_visite IS NULL OR v.date_visite BETWEEN ? AND ? "
         "ORDER BY v.date_visite, v.id",
         (str(start), str(end)),
     )
 
     scientific = df(
         "SELECT * FROM scientific_results "
-        "WHERE annee BETWEEN ? AND ? "
-        "ORDER BY annee DESC, id DESC",
+        "WHERE annee IS NULL OR annee BETWEEN ? AND ? "
+        "ORDER BY annee DESC NULLS LAST, id DESC",
         (start.year, end.year),
     )
 
     publications = df(
         "SELECT * FROM scientific_publications "
-        "WHERE annee BETWEEN ? AND ? "
-        "ORDER BY annee DESC, id DESC",
+        "WHERE annee IS NULL OR annee BETWEEN ? AND ? "
+        "ORDER BY annee DESC NULLS LAST, id DESC",
         (start.year, end.year),
     )
 
@@ -3005,7 +3001,7 @@ def render_reports():
     st.info(
         f"Le rapport global est filtré sur la période du {start:%d/%m/%Y} "
         f"au {end:%d/%m/%Y}. Les indicateurs, l’aperçu et les exports "
-        "reprennent les enregistrements correspondant à cette période. "
+        "reprennent les enregistrements correspondant à cette période, ainsi que les enregistrements sans date/année renseignée afin de ne pas perdre d’anciennes saisies. "
         "Les référentiels sans date (catalogue, formats, personnes et profils) "
         "restent disponibles comme données de référence."
     )
