@@ -1536,6 +1536,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
                 Paragraph(
                     "<b>Période du rapport</b><br/>"
                     f"{start or '—'} → {end or '—'}<br/>"
+                    f"Durée : {(end - start).days + 1 if start and end else '—'} jour(s)<br/>"
                     f"Généré le {datetime.now().strftime('%d/%m/%Y à %H:%M')}",
                     body,
                 ),
@@ -1826,6 +1827,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
         ["Fonction", profile_function],
         ["Périmètre", "Communication • Documentations • Résultats scientifiques • Visiteurs • Valorisation chercheurs"],
         ["Période du rapport", f"{start or '—'} → {end or '—'}"],
+        ["Durée de la période", f"{(end - start).days + 1 if start and end else '—'} jour(s) inclus"],
         ["Génération", datetime.now().strftime("%d/%m/%Y à %H:%M")],
     ]
     profile_df = pd.DataFrame(profile_rows[1:], columns=profile_rows[0])
@@ -2791,7 +2793,7 @@ def render_reports():
     st.caption(
         "Rapport premium global aligné sur l'organisation actuelle : "
         "Communication • Documentations (Biblio, Consultations, Personnes, Prêts) • Résultats scientifiques (7 rubriques métier distinctes, dont un registre unique Publications scientifiques & Documentation IST) • Visiteurs • Valorisation chercheurs. "
-        "La période proposée commence en 1900 afin d'inclure l'historique complet par défaut ; les lignes sans date ou année sont également conservées."
+        "Choisissez une durée prédéfinie ou saisissez vos dates. Les données datées, l’aperçu, le PDF premium et les exports sont filtrés sur la période sélectionnée."
     )
 
     st.markdown("""
@@ -2805,15 +2807,70 @@ def render_reports():
     </div>
     """, unsafe_allow_html=True)
 
+    # Sélecteur de durée : les préréglages renseignent les dates, qui restent
+    # ensuite modifiables manuellement. Le rapport, son aperçu et ses exports
+    # utilisent exactement les dates affichées ci-dessous.
+    st.markdown("### 🗓️ Définir la période du rapport global")
+    # Bornes explicites et larges pour éviter que Streamlit réutilise une
+    # ancienne plage de dates trop restrictive (par exemple une limite en 1910).
+    # On normalise aussi les valeurs persistées en session avant de créer les widgets.
+    _report_min_date = date(1900, 1, 1)
+    _report_max_date = date(2100, 12, 31)
+    st.session_state.setdefault("report_start_date", date(1900, 1, 1))
+    st.session_state.setdefault("report_end_date", date.today())
+    for _report_key in ("report_start_date", "report_end_date"):
+        _report_value = st.session_state.get(_report_key)
+        if isinstance(_report_value, datetime):
+            _report_value = _report_value.date()
+        if not isinstance(_report_value, date):
+            _report_value = date.today() if _report_key == "report_end_date" else date(1900, 1, 1)
+        if _report_value < _report_min_date:
+            _report_value = _report_min_date
+        elif _report_value > _report_max_date:
+            _report_value = _report_max_date
+        st.session_state[_report_key] = _report_value
+
+    def _apply_report_period_preset():
+        preset = st.session_state.get("report_period_preset", "Personnalisée")
+        today = date.today()
+        if preset == "7 derniers jours":
+            st.session_state["report_start_date"] = today - timedelta(days=6)
+            st.session_state["report_end_date"] = today
+        elif preset == "30 derniers jours":
+            st.session_state["report_start_date"] = today - timedelta(days=29)
+            st.session_state["report_end_date"] = today
+        elif preset == "90 derniers jours":
+            st.session_state["report_start_date"] = today - timedelta(days=89)
+            st.session_state["report_end_date"] = today
+        elif preset == "6 derniers mois (180 jours)":
+            st.session_state["report_start_date"] = today - timedelta(days=179)
+            st.session_state["report_end_date"] = today
+        elif preset == "12 derniers mois (365 jours)":
+            st.session_state["report_start_date"] = today - timedelta(days=364)
+            st.session_state["report_end_date"] = today
+        elif preset == "Année civile en cours":
+            st.session_state["report_start_date"] = date(today.year, 1, 1)
+            st.session_state["report_end_date"] = today
+        elif preset == "Historique complet depuis 1900":
+            st.session_state["report_start_date"] = date(1900, 1, 1)
+            st.session_state["report_end_date"] = today
+
+    st.selectbox(
+        "Durée / période rapide",
+        ["Personnalisée", "7 derniers jours", "30 derniers jours", "90 derniers jours",
+         "6 derniers mois (180 jours)", "12 derniers mois (365 jours)",
+         "Année civile en cours", "Historique complet depuis 1900"],
+        key="report_period_preset",
+        on_change=_apply_report_period_preset,
+        help="Choisissez une durée prédéfinie, puis ajustez librement les dates de début et de fin.",
+    )
     c1, c2 = st.columns(2)
     start = c1.date_input(
-        "Du",
-        date(1900, 1, 1),
+        "Date de début", min_value=_report_min_date, max_value=_report_max_date,
         key="report_start_date",
     )
     end = c2.date_input(
-        "Au",
-        date.today(),
+        "Date de fin", min_value=_report_min_date, max_value=_report_max_date,
         key="report_end_date",
     )
 
@@ -2821,29 +2878,44 @@ def render_reports():
         st.error("La date de début doit être antérieure ou égale à la date de fin.")
         return
 
+    duree_periode = (end - start).days + 1
+    st.info(f"📆 Période sélectionnée : **{start:%d/%m/%Y} – {end:%d/%m/%Y}** · **{duree_periode:,} jour(s)** inclus.".replace(",", " "))
+    include_undated = st.checkbox(
+        "Inclure aussi les enregistrements sans date/année (ils ne peuvent pas être attribués avec certitude à la période)",
+        value=False,
+        key="report_include_undated",
+        help="Désactivé par défaut pour que les chiffres représentent strictement la période sélectionnée. Les référentiels sans date (personnes, profils, catalogue et formats) restent visibles comme données de référence.",
+    )
+
     # ============================================================
     # DONNÉES DU RAPPORT — STRICTEMENT LIMITÉES À LA PÉRIODE CHOISIE
     # ============================================================
     # Une activité est incluse si sa période chevauche la période du rapport.
+    activity_where = (
+        "(date_activite <= ? AND COALESCE(date_fin, date_activite) >= ?)"
+        + (" OR date_activite IS NULL" if include_undated else "")
+    )
     activities = df(
         "SELECT *, (date_fin - date_activite + 1) AS duree_jours FROM activities "
-        "WHERE (date_activite IS NULL OR (date_activite <= ? AND COALESCE(date_fin, date_activite) >= ?)) "
-        "ORDER BY date_activite, id",
+        f"WHERE ({activity_where}) ORDER BY date_activite NULLS LAST, id",
         (str(end), str(start)),
     )
 
     communications = df(
-        "SELECT * FROM communications WHERE date_publication IS NULL OR date_publication BETWEEN ? AND ? "
+        "SELECT * FROM communications WHERE (date_publication BETWEEN ? AND ?"
+        + (" OR date_publication IS NULL" if include_undated else "") + ") "
         "ORDER BY date_publication NULLS LAST, id",
         (str(start), str(end)),
     )
     media_df = df(
-        "SELECT * FROM media WHERE date_intervention IS NULL OR date_intervention BETWEEN ? AND ? "
+        "SELECT * FROM media WHERE (date_intervention BETWEEN ? AND ?"
+        + (" OR date_intervention IS NULL" if include_undated else "") + ") "
         "ORDER BY date_intervention NULLS LAST, id",
         (str(start), str(end)),
     )
     av = df(
-        "SELECT * FROM audiovisual WHERE date_production IS NULL OR date_production BETWEEN ? AND ? "
+        "SELECT * FROM audiovisual WHERE (date_production BETWEEN ? AND ?"
+        + (" OR date_production IS NULL" if include_undated else "") + ") "
         "ORDER BY date_production NULLS LAST, id",
         (str(start), str(end)),
     )
@@ -2854,8 +2926,9 @@ def render_reports():
         "SELECT * FROM communication_formats ORDER BY categorie, nom_format"
     )
     documents = df(
-        "SELECT * FROM documents WHERE annee IS NULL OR annee BETWEEN ? AND ? "
-        "ORDER BY annee DESC, id DESC",
+        "SELECT * FROM documents WHERE (annee BETWEEN ? AND ?"
+        + (" OR annee IS NULL" if include_undated else "") + ") "
+        "ORDER BY annee DESC NULLS LAST, id DESC",
         (start.year, end.year),
     )
     library = df("SELECT * FROM library_items ORDER BY titre")
@@ -2867,8 +2940,9 @@ def render_reports():
         "FROM consultations c "
         "LEFT JOIN people p ON p.id=c.person_id "
         "LEFT JOIN library_items i ON i.id=c.item_id "
-        "WHERE c.date_consultation IS NULL OR c.date_consultation BETWEEN ? AND ? "
-        "ORDER BY c.date_consultation, c.id",
+        "WHERE (c.date_consultation BETWEEN ? AND ?"
+        + (" OR c.date_consultation IS NULL" if include_undated else "") + ") "
+        "ORDER BY c.date_consultation NULLS LAST, c.id",
         (str(start), str(end)),
     )
     loans = df(
@@ -2879,8 +2953,9 @@ def render_reports():
         "FROM loans l "
         "LEFT JOIN people p ON p.id=l.person_id "
         "LEFT JOIN library_items i ON i.id=l.item_id "
-        "WHERE l.date_emprunt IS NULL OR l.date_emprunt BETWEEN ? AND ? "
-        "ORDER BY l.date_emprunt, l.id",
+        "WHERE (l.date_emprunt BETWEEN ? AND ?"
+        + (" OR l.date_emprunt IS NULL" if include_undated else "") + ") "
+        "ORDER BY l.date_emprunt NULLS LAST, l.id",
         (str(start), str(end)),
     )
 
@@ -2900,21 +2975,22 @@ def render_reports():
         "v.documents_consultes, v.documents_empruntes, v.observations "
         "FROM library_visits v "
         "LEFT JOIN people p ON p.id=v.person_id "
-        "WHERE v.date_visite IS NULL OR v.date_visite BETWEEN ? AND ? "
-        "ORDER BY v.date_visite, v.id",
+        "WHERE (v.date_visite BETWEEN ? AND ?"
+        + (" OR v.date_visite IS NULL" if include_undated else "") + ") "
+        "ORDER BY v.date_visite NULLS LAST, v.id",
         (str(start), str(end)),
     )
 
     scientific = df(
-        "SELECT * FROM scientific_results "
-        "WHERE annee IS NULL OR annee BETWEEN ? AND ? "
+        "SELECT * FROM scientific_results WHERE (annee BETWEEN ? AND ?"
+        + (" OR annee IS NULL" if include_undated else "") + ") "
         "ORDER BY annee DESC NULLS LAST, id DESC",
         (start.year, end.year),
     )
 
     publications = df(
-        "SELECT * FROM scientific_publications "
-        "WHERE annee IS NULL OR annee BETWEEN ? AND ? "
+        "SELECT * FROM scientific_publications WHERE (annee BETWEEN ? AND ?"
+        + (" OR annee IS NULL" if include_undated else "") + ") "
         "ORDER BY annee DESC NULLS LAST, id DESC",
         (start.year, end.year),
     )
@@ -3027,11 +3103,11 @@ def render_reports():
     # INDICATEURS — données de la période sélectionnée
     # ============================================================
     st.info(
-        f"Le rapport global est filtré sur la période du {start:%d/%m/%Y} "
-        f"au {end:%d/%m/%Y}. Les indicateurs, l’aperçu et les exports "
-        "reprennent les enregistrements correspondant à cette période, ainsi que les enregistrements sans date/année renseignée afin de ne pas perdre d’anciennes saisies. "
-        "Les référentiels sans date (catalogue, formats, personnes et profils) "
-        "restent disponibles comme données de référence."
+        f"Le rapport global, le PDF premium, l’aperçu et les exports utilisent la période du "
+        f"{start:%d/%m/%Y} au {end:%d/%m/%Y} ({duree_periode} jour(s) inclus). "
+        + ("Les enregistrements sans date/année sont également inclus, mais ne peuvent pas être attribués avec certitude à cette période. " if include_undated else "Seuls les enregistrements datés dans la période sont inclus dans les registres temporels. ")
+        + "Les résultats scientifiques et documents disposant seulement d’une année sont filtrés par année civile incluse dans la plage choisie. "
+        + "Les référentiels sans date (catalogue, formats, personnes et profils) restent disponibles comme données de référence."
     )
     st.subheader("📌 Indicateurs de la période")
 
@@ -3149,7 +3225,10 @@ def render_reports():
     summary = pd.DataFrame({
         "Espace": [x[0] for x in vals],
         "Nombre": [x[1] for x in vals],
-        "Période": [f"{start} → {end}"] * len(vals),
+        "Date de début": [str(start)] * len(vals),
+        "Date de fin": [str(end)] * len(vals),
+        "Durée (jours inclus)": [duree_periode] * len(vals),
+        "Inclure les données sans date": ["Oui" if include_undated else "Non"] * len(vals),
     })
     export_buttons(
         summary,
