@@ -733,7 +733,7 @@ def _pdf_header_footer(canvas, doc):
     canvas.drawRightString(
         w - 34,
         h - 31,
-        "IST • COMMUNICATION • DOCUMENTATION • RÉSULTAT SCIENTIFIQUE"
+        "IST • COMMUNICATION • DOCUMENTATION • PUBLICATIONS & DOCUMENTS SCIENTIFIQUES"
     )
 
     # Ligne de pied
@@ -1385,9 +1385,10 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
           3.2 Bibliothèque
           3.3 Consultations
           3.4 Prêts & retours
-      04. Résultat scientifique
-          4.1 Résultats scientifiques
+      04. Résultats scientifiques
+          4.1 Documents scientifiques
           4.2 Publications scientifiques
+          4.3 Notes et documentation IST
       05. Visiteurs
       06. Valorisation chercheurs
           6.1 Profils chercheurs
@@ -1412,7 +1413,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
         bottomMargin=45,
         title="Rapport premium IST et Communication — CRA/ISRA",
         author="CRA/ISRA",
-        subject="Rapport structuré Communication • Documentations • Résultat scientifique",
+        subject="Rapport structuré Communication • Documentations • Résultats scientifiques",
     )
 
     styles = getSampleStyleSheet()
@@ -1506,7 +1507,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     )
     story.append(
         Paragraph(
-            "Communication • Documentations • Résultat scientifique",
+            "Communication • Documentations • Résultats scientifiques",
             cover_sub,
         )
     )
@@ -1563,10 +1564,12 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
         ("Actions de communication", report_data.get("Communication")),
         ("Presse & médias", report_data.get("Médias")),
         ("Audiovisuel", report_data.get("Audiovisuel")),
+        ("Compléments de communication — total", pd.concat([report_data.get(k, pd.DataFrame()) for k in ["Communication", "Médias", "Audiovisuel", "Formats"]], ignore_index=True)),
         ("Documents IST", report_data.get("Documents IST")),
         ("Bibliothèque", report_data.get("Bibliothèque")),
         ("Résultats scientifiques", report_data.get("Résultats scientifiques")),
         ("Publications scientifiques", report_data.get("Publications scientifiques")),
+        ("Résultats scientifiques — total", pd.concat([report_data.get(k, pd.DataFrame()) for k in ["Résultats scientifiques", "Publications scientifiques", "Documents IST"]], ignore_index=True)),
         ("Notes politiques", report_data.get("Notes politiques")),
         ("Notes de synthèse", report_data.get("Notes de synthèse")),
         ("Visiteurs", report_data.get("Visiteurs")),
@@ -1604,7 +1607,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
          str(sum(len(report_data.get(k, pd.DataFrame())) for k in [
              "Bibliothèque", "Consultations", "Prêts", "Personnes"
          ]))],
-        ["Résultat scientifique", "Résultats, publications et Documentation IST",
+        ["Résultats scientifiques", "Fiches, mémoires, thèses, rapports, publications, notes et Documentation IST",
          str(sum(len(report_data.get(k, pd.DataFrame())) for k in [
              "Résultats scientifiques", "Publications scientifiques", "Documents IST"
          ]))],
@@ -1624,7 +1627,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     # ------------------------------------------------------------
     story.extend(_pdf_section_header(
         "02", "COMMUNICATION",
-        "Activités au centre, actions de diffusion, presse, médias, audiovisuel et formats.",
+        "Activités au centre et compléments de communication regroupés dans un même espace : actions, presse et médias, audiovisuel et formats. Les tableaux détaillés restent distincts dans le rapport.",
         section
     ))
 
@@ -1720,16 +1723,16 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     story.append(PageBreak())
 
     # ------------------------------------------------------------
-    # 04 — RÉSULTAT SCIENTIFIQUE
+    # 04 — PUBLICATIONS & DOCUMENTS SCIENTIFIQUES
     # ------------------------------------------------------------
     story.extend(_pdf_section_header(
-        "04", "RÉSULTAT SCIENTIFIQUE",
-        "Capitalisation des résultats, fiches, mémoires, thèses, rapports et publications.",
+        "04", "RÉSULTATS SCIENTIFIQUES",
+        "Espace unique de capitalisation des documents scientifiques, publications, notes et ressources IST.",
         section
     ))
 
     scientific_sections = [
-        ("4.1", "Résultats scientifiques",
+        ("4.1", "Documents scientifiques",
          "Fiches techniques, mémoires, thèses, rapports et autres résultats.",
          report_data.get("Résultats scientifiques")),
         ("4.2", "Publication scientifique",
@@ -1818,7 +1821,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
         ["Élément", "Information"],
         ["Nom", profile_name],
         ["Fonction", profile_function],
-        ["Périmètre", "Communication • Documentation • IST • Bibliothèque • Résultat scientifique"],
+        ["Périmètre", "Communication • Documentations • Résultats scientifiques • Visiteurs • Valorisation chercheurs"],
         ["Période du rapport", f"{start or '—'} → {end or '—'}"],
         ["Génération", datetime.now().strftime("%d/%m/%Y à %H:%M")],
     ]
@@ -1891,7 +1894,7 @@ CRUD_TABLES_BY_PAGE = {
         "Consultations": "consultations", "Prêts et retours": "loans",
     },
     "👥 Visiteurs": {"Registre des visiteurs": "library_visits"},
-    "🔬 Résultat scientifique": {
+    "🔬 Résultats scientifiques": {
         "Résultats scientifiques": "scientific_results", "Publications scientifiques": "scientific_publications",
         "Documentation IST": "documents",
     },
@@ -2009,7 +2012,7 @@ pages = [
     "🏠 Tableau de bord",
     "📣 Communication",
     "📚 Documentations",
-    "🔬 Résultat scientifique",
+    "🔬 Résultats scientifiques",
     "👥 Visiteurs",
     "🧬 Valorisation chercheurs",
     "👤 Profil",
@@ -2026,7 +2029,11 @@ def render_dashboard():
         ("Activités", scalar("SELECT COUNT(*) FROM activities")),
         ("Participants", scalar("SELECT COUNT(*) FROM participants")),
         ("Personnes", scalar("SELECT COUNT(*) FROM people")),
-        ("Publications/actions", scalar("SELECT COUNT(*) FROM communications")),
+        ("Actions de communication", scalar("SELECT COUNT(*) FROM communications")),
+        ("Presse & médias", scalar("SELECT COUNT(*) FROM media")),
+        ("Productions audiovisuelles", scalar("SELECT COUNT(*) FROM audiovisual")),
+        ("Formats de communication", scalar("SELECT COUNT(*) FROM communication_formats")),
+        ("Compléments de communication — total", scalar("SELECT (SELECT COUNT(*) FROM communications) + (SELECT COUNT(*) FROM media) + (SELECT COUNT(*) FROM audiovisual) + (SELECT COUNT(*) FROM communication_formats)")),
         ("Documents IST", scalar("SELECT COUNT(*) FROM documents")),
         ("Documents bibliothèque", scalar("SELECT COUNT(*) FROM library_items")),
         ("Consultations", scalar("SELECT COUNT(*) FROM consultations")),
@@ -2034,6 +2041,7 @@ def render_dashboard():
         ("Publications scientifiques", scalar("SELECT COUNT(*) FROM scientific_publications")),
         ("Notes politiques", scalar("SELECT COUNT(*) FROM scientific_publications WHERE type_publication='Note politique'")),
         ("Notes de synthèse", scalar("SELECT COUNT(*) FROM scientific_publications WHERE type_publication='Note de synthèse'")),
+        ("Résultats scientifiques — total", scalar("SELECT (SELECT COUNT(*) FROM scientific_results) + (SELECT COUNT(*) FROM scientific_publications) + (SELECT COUNT(*) FROM documents)")),
         ("Visiteurs", scalar("SELECT COUNT(*) FROM library_visits")),
         ("Prêts en cours", scalar("SELECT COUNT(*) FROM loans WHERE statut='En cours'")),
         ("Prêts en retard", scalar("SELECT COUNT(*) FROM loans WHERE statut='En retard'")),
@@ -2205,7 +2213,7 @@ def _communication_media():
         media_name=c1.text_input("Nom du média *"); media_type=c2.selectbox("Type",["Télévision","Radio","Presse écrite","Presse en ligne","Magazine","Site web","Autre"]); journaliste=c3.text_input("Journaliste")
         c1,c2,c3=st.columns(3)
         interviewee=c1.text_input("Personne interviewée"); sujet=c2.text_input("Sujet"); di=c3.date_input("Date",date.today())
-        lieu=st.text_input("Lieu"); type_intervention=st.selectbox("Type d'intervention",["Interview","Reportage","Article","Émission","Conférence de presse","Autre"]); lien=st.text_input("Lien")
+        lieu=st.text_input("Lieu"); type_intervention=st.selectbox("Type d'intervention",["Interview","Reportage","Article","Émission","Conférence de presse","Autre"]); lien=st.text_input("Lien web (URL)",placeholder="https://…")
         observations=st.text_area("Observations")
         ok=st.form_submit_button("💾 Enregistrer",type="primary")
     if ok:
@@ -2218,8 +2226,8 @@ def _communication_media():
     st.dataframe(data,use_container_width=True,hide_index=True)
     export_buttons(data,"medias","Presse et médias CRA/ISRA")
 
-def _communication_audiovisual_formats():
-    st.subheader("🎥 Audiovisuel")
+def _communication_audiovisual():
+    st.subheader("🎥 Productions audiovisuelles")
     with st.form("av_form_new"):
         c1,c2,c3=st.columns(3)
         titre=c1.text_input("Titre *"); typ=c2.selectbox("Type",["Film","Vidéo","Interview","Reportage","Documentaire","Autre"]); dp=c3.date_input("Date",date.today())
@@ -2227,20 +2235,22 @@ def _communication_audiovisual_formats():
         lieu=c1.text_input("Lieu"); theme=c2.text_input("Thème"); duree=c3.text_input("Durée")
         interviewes=st.text_area("Personnes interviewées")
         responsable=st.text_input("Responsable"); statut=c1.selectbox("Statut",["Prévu","En préparation","En production","Terminé","Diffusé"])
-        lien=c2.text_input("🔗 Lien de diffusion / vidéo / plateforme"); fichier=None
+        lien=c2.text_input("🔗 Lien de diffusion / vidéo / plateforme",placeholder="https://…")
         observations=st.text_area("Observations")
         ok=st.form_submit_button("💾 Enregistrer",type="primary")
     if ok:
         if not titre.strip(): st.error("Le titre est obligatoire.")
         else:
-            path=save_uploaded(fichier,"audiovisuel")
+            path=None
             q("""INSERT INTO audiovisual(titre,type_production,date_production,lieu,theme,interviewes,duree,responsable,statut,lien,fichier_original,observations)
                  VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",(titre,typ,str(dp),lieu,theme,interviewes,duree,responsable,statut,lien,path,observations))
             st.success("Production enregistrée."); st.rerun()
     data=df("SELECT * FROM audiovisual ORDER BY date_production DESC")
     st.dataframe(data,use_container_width=True,hide_index=True)
     export_buttons(data,"audiovisuel","Productions audiovisuelles CRA/ISRA")
-    st.divider()
+
+
+def _communication_formats():
     st.subheader("🧩 Formats de communication et de production")
     with st.form("format_form"):
         c1,c2=st.columns(2)
@@ -2279,10 +2289,26 @@ def render_communication():
     render_activities()
 
     st.markdown("## 📚 Compléments de communication")
-    t1,t2,t3=st.tabs(["📣 Actions de communication","📰 Médias","🎥 Audiovisuel & formats"])
-    with t1: _communication_actions()
-    with t2: _communication_media()
-    with t3: _communication_audiovisual_formats()
+    st.caption(
+        "Espace unique regroupant les actions de communication, les relations avec les médias, "
+        "les productions audiovisuelles et le référentiel des formats. Les formulaires, tableaux "
+        "et exports de chaque rubrique sont conservés."
+    )
+    st.markdown(
+        '<div class="section-banner"><span>COMPLÉMENTS DE COMMUNICATION</span>'
+        '<strong>Actions • Presse & médias • Audiovisuel • Formats</strong></div>',
+        unsafe_allow_html=True,
+    )
+    # Un seul groupe « Compléments de communication » : les quatre rubriques
+    # restent disponibles sans créer d'onglets ou d'espaces de navigation séparés.
+    with st.expander("📣 Actions de communication et diffusion", expanded=True):
+        _communication_actions()
+    with st.expander("📰 Presse et médias", expanded=False):
+        _communication_media()
+    with st.expander("🎥 Productions audiovisuelles", expanded=False):
+        _communication_audiovisual()
+    with st.expander("🧩 Formats de communication et de production", expanded=False):
+        _communication_formats()
 
 def render_documentations():
     """Espace Documentation organisé en quatre onglets métier indépendants."""
@@ -2304,14 +2330,13 @@ def render_documentations():
             domaine=c1.text_input("Domaine"); theme=c2.text_input("Thématique"); mots=c3.text_input("Mots-clés")
             c1,c2,c3=st.columns(3)
             exemplaires=c1.number_input("Exemplaires",1,10000,1); disponibles=c2.number_input("Disponibles",0,10000,1); localisation=c3.text_input("Localisation")
-            etat=c1.selectbox("État",["Bon","Moyen","À restaurer","Endommagé"]); format_doc=c2.selectbox("Format",["Papier","Numérique","Papier + numérique"]); lien=c3.text_input("Lien")
+            etat=c1.selectbox("État",["Bon","Moyen","À restaurer","Endommagé"]); format_doc=c2.selectbox("Format",["Papier","Numérique","Papier + numérique"]); lien=c3.text_input("Lien web (URL)",placeholder="https://…")
             resume=st.text_area("Résumé")
-            fichier=None
             observations=st.text_area("Observations")
             ok=st.form_submit_button("💾 Ajouter au catalogue",type="primary")
         if ok:
             try:
-                path=save_uploaded(fichier,"bibliotheque")
+                path=None
                 q("""INSERT INTO library_items(inventaire,cote,isbn,titre,sous_titre,auteurs,editeur,annee,type_document,domaine,thematique,mots_cles,exemplaires,disponibles,localisation,etat,format_document,resume,fichier,lien,observations)
                      VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(inventaire,cote,isbn,titre,sous_titre,auteurs,editeur,annee,typ,domaine,theme,mots,exemplaires,disponibles,localisation,etat,format_doc,resume,path,lien,observations))
                 st.success("Document ajouté au catalogue."); st.rerun()
@@ -2400,7 +2425,7 @@ def render_documentations():
 
 
 def render_documentation_ist():
-    """Onglet Documentation IST déplacé dans Résultat scientifique."""
+    """Formulaire Documentation IST, conservé pour compatibilité interne."""
     st.subheader("📄 Documentation IST")
     st.caption("Recherche, veille, ressources documentaires et fonds IST.")
     with st.form("doc_form_new"):
@@ -2413,8 +2438,7 @@ def render_documentation_ist():
         resume=st.text_area("Résumé")
         c1,c2,c3=st.columns(3)
         langue=c1.text_input("Langue",value="Français"); pages=c2.number_input("Pages",0,step=1); reference=c3.text_input("Référence")
-        lien=st.text_input("Lien")
-        fichier=None
+        lien=st.text_input("Lien web (URL)",placeholder="https://…")
         statut=st.selectbox("Statut",["Disponible","À vérifier","Archivé"])
         observations=st.text_area("Observations")
         ok=st.form_submit_button("💾 Ajouter le document",type="primary")
@@ -2422,7 +2446,7 @@ def render_documentation_ist():
         if not titre.strip():
             st.error("Le titre est obligatoire.")
         else:
-            path=save_uploaded(fichier,"documents")
+            path=None
             q("""INSERT INTO documents(titre,auteurs,annee,type_document,thematique,mots_cles,chercheur_associe,projet,resume,langue,pages,reference,fichier,lien,statut,observations)
                  VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(titre,auteurs,annee,typ,theme,mots,chercheur,projet,resume,langue,pages,reference,path,lien,statut,observations))
             st.success("Document IST enregistré."); st.rerun()
@@ -2514,7 +2538,7 @@ def render_researchers():
             projet=st.text_input("Projet")
             c1,c2,c3=st.columns(3)
             type_val=c1.selectbox("Type de valorisation",["Article","Interview","Portrait","Vidéo","Publication","Communication scientifique","Conférence","Démonstration","Autre"])
-            support=c2.text_input("Support"); lien=c3.text_input("Lien")
+            support=c2.text_input("Support"); lien=c3.text_input("Lien web (URL)",placeholder="https://…")
             observations=st.text_area("Observations")
             ok=st.form_submit_button("💾 Enregistrer la valorisation",type="primary")
         if ok:
@@ -2548,38 +2572,72 @@ def render_profile():
     # -----------------------------
 
 def render_scientific_results():
-    st.header("🔬 Résultat scientifique")
-    st.caption("Résultats, publications, notes et documentation IST regroupés dans des onglets indépendants.")
-    tabs = st.tabs([
-        "🧾 Fiche technique", "🎓 Mémoire", "🎓 Thèse", "📑 Rapport",
-        "📰 Publication scientifique", "🗒️ Note politique", "📋 Note de synthèse", "📄 Documentation IST"
+    """Espace Résultats scientifiques organisé en sept onglets métier."""
+    st.header("🔬 Résultats scientifiques")
+    st.caption(
+        "Un espace unique pour les fiches techniques, mémoires, thèses, rapports, "
+        "publications scientifiques, documentation IST, notes politiques et notes de synthèse. "
+        "Privilégiez les liens web, DOI et liens institutionnels : aucun fichier n'est téléversé."
+    )
+    st.markdown(
+        '<div class="section-banner"><span>RÉSULTATS SCIENTIFIQUES</span>'
+        '<strong>Documents • Publications & IST • Notes politiques • Notes de synthèse</strong></div>',
+        unsafe_allow_html=True,
+    )
+
+    # Sept onglets : Publication scientifique et Documentation IST sont réunies
+    # dans un même onglet, sans supprimer leurs formulaires, registres ou exports.
+    tab_fiche, tab_memoire, tab_these, tab_rapport, tab_publications_ist, tab_note_politique, tab_note_synthese = st.tabs([
+        "🧾 Fiches techniques", "📘 Mémoires", "🎓 Thèses", "📑 Rapports",
+        "📰 Publications scientifiques & Documentation IST", "🗒️ Notes politiques", "📋 Notes de synthèse"
     ])
-    result_types = ["Fiche technique", "Mémoire", "Thèse", "Rapport"]
 
-    for tab, label in zip(tabs[:4], result_types):
-        with tab:
-            with st.form(f"scientific_{label.replace(' ','_')}"):
-                c1,c2,c3=st.columns(3)
-                titre=c1.text_input("Titre *"); auteurs=c2.text_input("Auteur(s)"); annee=c3.number_input("Année",1900,2100,value=date.today().year)
-                c1,c2,c3=st.columns(3); domaine=c1.text_input("Domaine"); projet=c2.text_input("Projet"); public_cible=c3.text_input("Public cible")
-                resume=st.text_area("Résumé"); mots=c1.text_input("Mots-clés"); reference=c2.text_input("Référence"); lien=c3.text_input("Lien")
-                fichier=None; statut=st.selectbox("Statut",["Disponible","En préparation","Archivé"]); observations=st.text_area("Observations")
-                ok=st.form_submit_button("💾 Enregistrer",type="primary")
-            if ok:
-                if not titre.strip(): st.error("Le titre est obligatoire.")
-                else:
-                    path=save_uploaded(fichier,"resultats_scientifiques")
-                    q("""INSERT INTO scientific_results(type_resultat,titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,fichier,lien,statut,observations)
-                         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(label,titre,auteurs,annee,domaine,projet,resume,mots,public_cible,reference,path,lien,statut,observations))
-                    st.success(f"{label} enregistré."); st.rerun()
-            data=df("SELECT id,type_resultat,titre,auteurs,annee,domaine,projet,reference,statut,lien FROM scientific_results WHERE type_resultat=? ORDER BY annee DESC,id DESC",(label,))
-            st.dataframe(data,use_container_width=True,hide_index=True)
-            export_buttons(data,f"{label.lower().replace(' ','_')}",label)
+    def render_result_form(label):
+        with st.form(f"scientific_{label.replace(' ','_')}"):
+            c1,c2,c3=st.columns(3)
+            titre=c1.text_input("Titre *", key=f"sci_titre_{label}")
+            auteurs=c2.text_input("Auteur(s)", key=f"sci_auteurs_{label}")
+            annee=c3.number_input("Année",1900,2100,value=date.today().year,key=f"sci_annee_{label}")
+            c1,c2,c3=st.columns(3)
+            domaine=c1.text_input("Domaine",key=f"sci_domaine_{label}")
+            projet=c2.text_input("Projet",key=f"sci_projet_{label}")
+            public_cible=c3.text_input("Public cible",key=f"sci_public_{label}")
+            resume=st.text_area("Résumé",key=f"sci_resume_{label}")
+            c1,c2,c3=st.columns(3)
+            mots=c1.text_input("Mots-clés",key=f"sci_mots_{label}")
+            reference=c2.text_input("Référence / DOI",key=f"sci_ref_{label}")
+            lien=c3.text_input("Lien web",key=f"sci_lien_{label}",placeholder="https://…")
+            statut=st.selectbox("Statut",["Disponible","En préparation","Archivé"],key=f"sci_statut_{label}")
+            observations=st.text_area("Observations",key=f"sci_obs_{label}")
+            ok=st.form_submit_button("💾 Enregistrer",type="primary")
+        if ok:
+            if not titre.strip():
+                st.error("Le titre est obligatoire.")
+            else:
+                q("""INSERT INTO scientific_results(type_resultat,titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,fichier,lien,statut,observations)
+                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                  (label,titre,auteurs,annee,domaine,projet,resume,mots,public_cible,reference,None,lien,statut,observations))
+                st.success(f"{label} enregistré."); st.rerun()
+        data=df("SELECT id,type_resultat,titre,auteurs,annee,domaine,projet,reference,statut,lien FROM scientific_results WHERE type_resultat=? ORDER BY annee DESC,id DESC",(label,))
+        st.dataframe(data,use_container_width=True,hide_index=True)
+        export_buttons(data,f"{label.lower().replace(' ','_')}",label)
 
-    # Onglet Publication scientifique : formulaire de saisie + vue globale, sans sous-onglets.
-    with tabs[4]:
-        st.subheader("📰 Enregistrer une publication scientifique")
-        st.caption("Renseignez les informations bibliographiques et scientifiques, puis retrouvez la publication dans le registre ci-dessous. Les notes politiques et notes de synthèse restent saisies dans leurs onglets dédiés.")
+    with tab_fiche:
+        st.subheader("🧾 Fiches techniques")
+        render_result_form("Fiche technique")
+    with tab_memoire:
+        st.subheader("📘 Mémoires")
+        render_result_form("Mémoire")
+    with tab_these:
+        st.subheader("🎓 Thèses")
+        render_result_form("Thèse")
+    with tab_rapport:
+        st.subheader("📑 Rapports scientifiques")
+        render_result_form("Rapport")
+
+    with tab_publications_ist:
+        st.subheader("📰 Publications scientifiques")
+        st.caption("Enregistrez les références bibliographiques et leurs liens web ou DOI.")
         with st.form("publication_scientifique_form"):
             c1,c2,c3=st.columns(3)
             titre=c1.text_input("Titre de la publication *")
@@ -2594,9 +2652,7 @@ def render_scientific_results():
             mots=c1.text_input("Mots-clés")
             public_cible=c2.text_input("Public cible")
             reference=c3.text_input("Référence bibliographique / DOI")
-            c1,c2=st.columns(2)
-            lien=c1.text_input("Lien web (URL)")
-            fichier=c2.file_uploader("Joindre le fichier de la publication",type=["pdf","doc","docx"])
+            lien=st.text_input("Lien web de la publication (URL)",placeholder="https://…")
             statut=st.selectbox("Statut",["Disponible","En préparation","Archivé"])
             observations=st.text_area("Observations")
             ok=st.form_submit_button("💾 Enregistrer la publication scientifique",type="primary")
@@ -2604,40 +2660,84 @@ def render_scientific_results():
             if not titre.strip():
                 st.error("Le titre de la publication est obligatoire.")
             else:
-                path=save_uploaded(fichier,"publications_scientifiques")
                 q("""INSERT INTO scientific_publications(type_publication,titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,fichier,lien,statut,observations)
-                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(type_publication,titre,auteurs,annee,domaine,projet,resume,mots,public_cible,reference,path,lien,statut,observations))
-                st.success("Publication scientifique enregistrée.")
-                st.rerun()
-        st.divider()
-        st.subheader("📚 Registre de toutes les publications scientifiques")
-        publications=df("SELECT id,type_publication,titre,auteurs,annee,domaine,projet,reference,statut,lien FROM scientific_publications ORDER BY annee DESC,id DESC")
+                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                  (type_publication,titre,auteurs,annee,domaine,projet,resume,mots,public_cible,reference,None,lien,statut,observations))
+                st.success("Publication scientifique enregistrée."); st.rerun()
+        publications=df("SELECT id,type_publication,titre,auteurs,annee,domaine,projet,reference,statut,lien FROM scientific_publications WHERE type_publication NOT IN ('Note politique','Note de synthèse') ORDER BY annee DESC,id DESC")
         st.dataframe(publications,use_container_width=True,hide_index=True)
-        export_buttons(publications,"publications_scientifiques","Toutes les publications scientifiques CRA/ISRA")
+        export_buttons(publications,"publications_scientifiques","Publications scientifiques CRA/ISRA")
 
-    for tab, ptype in [(tabs[5], "Note politique"), (tabs[6], "Note de synthèse")]:
-        with tab:
-            st.subheader("🗒️ " + ptype if ptype == "Note politique" else "📋 " + ptype)
-            with st.form(f"publication_{ptype.replace(' ','_')}"):
-                c1,c2,c3=st.columns(3)
-                titre=c1.text_input("Titre *"); auteurs=c2.text_input("Auteur(s)"); annee=c3.number_input("Année",1900,2100,value=date.today().year)
-                c1,c2,c3=st.columns(3); domaine=c1.text_input("Domaine"); projet=c2.text_input("Projet"); public_cible=c3.text_input("Public cible")
-                resume=st.text_area("Résumé"); mots=c1.text_input("Mots-clés"); reference=c2.text_input("Référence"); lien=c3.text_input("Lien")
-                fichier=None; statut=st.selectbox("Statut",["Disponible","En préparation","Archivé"]); observations=st.text_area("Observations")
-                ok=st.form_submit_button("💾 Enregistrer",type="primary")
-            if ok:
-                if not titre.strip(): st.error("Le titre est obligatoire.")
-                else:
-                    path=save_uploaded(fichier,"publications_scientifiques")
-                    q("""INSERT INTO scientific_publications(type_publication,titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,fichier,lien,statut,observations)
-                         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(ptype,titre,auteurs,annee,domaine,projet,resume,mots,public_cible,reference,path,lien,statut,observations))
-                    st.success(f"{ptype} enregistrée."); st.rerun()
-            data=df("SELECT id,type_publication,titre,auteurs,annee,domaine,projet,reference,statut,lien FROM scientific_publications WHERE type_publication=? ORDER BY annee DESC,id DESC",(ptype,))
-            st.dataframe(data,use_container_width=True,hide_index=True)
-            export_buttons(data,ptype.lower().replace(' ','_'),ptype)
+        st.divider()
+        st.subheader("📄 Documentation IST")
+        st.caption("Recherche, veille, ressources documentaires et fonds IST. Utilisez un lien web plutôt qu'une pièce jointe.")
+        with st.form("doc_form_new"):
+            c1,c2,c3=st.columns(3)
+            doc_titre=c1.text_input("Titre *",key="ist_titre")
+            doc_auteurs=c2.text_input("Auteur(s)",key="ist_auteurs")
+            doc_annee=c3.number_input("Année",1900,2100,value=date.today().year,key="ist_annee")
+            c1,c2,c3=st.columns(3)
+            doc_type=c1.selectbox("Type",["Article scientifique","Mémoire","Thèse","Rapport","Communication","Publication","Document technique","Guide","Brochure","Plaquette","Revue","Bulletin","Autre"],key="ist_type")
+            theme=c2.text_input("Thématique",key="ist_theme")
+            doc_mots=c3.text_input("Mots-clés",key="ist_mots")
+            chercheur=st.text_input("Chercheur associé",key="ist_chercheur")
+            doc_projet=st.text_input("Projet",key="ist_projet")
+            doc_resume=st.text_area("Résumé",key="ist_resume")
+            c1,c2,c3=st.columns(3)
+            langue=c1.text_input("Langue",value="Français",key="ist_langue")
+            pages=c2.number_input("Pages",0,step=1,key="ist_pages")
+            doc_reference=c3.text_input("Référence",key="ist_reference")
+            doc_lien=st.text_input("Lien web (URL)",placeholder="https://…",key="ist_lien")
+            doc_statut=st.selectbox("Statut",["Disponible","À vérifier","Archivé"],key="ist_statut")
+            doc_observations=st.text_area("Observations",key="ist_observations")
+            doc_ok=st.form_submit_button("💾 Ajouter le document IST",type="primary")
+        if doc_ok:
+            if not doc_titre.strip():
+                st.error("Le titre est obligatoire.")
+            else:
+                q("""INSERT INTO documents(titre,auteurs,annee,type_document,thematique,mots_cles,chercheur_associe,projet,resume,langue,pages,reference,fichier,lien,statut,observations)
+                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                  (doc_titre,doc_auteurs,doc_annee,doc_type,theme,doc_mots,chercheur,doc_projet,doc_resume,langue,pages,doc_reference,None,doc_lien,doc_statut,doc_observations))
+                st.success("Document IST enregistré."); st.rerun()
+        documents_ist=df("SELECT id,titre,auteurs,annee,type_document,thematique,reference,statut,lien FROM documents ORDER BY annee DESC,id DESC")
+        st.dataframe(documents_ist,use_container_width=True,hide_index=True)
+        export_buttons(documents_ist,"documentation_ist","Documentation IST CRA/ISRA")
 
-    with tabs[7]:
-        render_documentation_ist()
+    def render_publication_note(ptype, icon):
+        st.subheader(f"{icon} {ptype}")
+        with st.form(f"publication_{ptype.replace(' ','_')}"):
+            c1,c2,c3=st.columns(3)
+            titre=c1.text_input("Titre *",key=f"{ptype}_titre")
+            auteurs=c2.text_input("Auteur(s)",key=f"{ptype}_auteurs")
+            annee=c3.number_input("Année",1900,2100,value=date.today().year,key=f"{ptype}_annee")
+            c1,c2,c3=st.columns(3)
+            domaine=c1.text_input("Domaine",key=f"{ptype}_domaine")
+            projet=c2.text_input("Projet",key=f"{ptype}_projet")
+            public_cible=c3.text_input("Public cible",key=f"{ptype}_public")
+            resume=st.text_area("Résumé",key=f"{ptype}_resume")
+            c1,c2,c3=st.columns(3)
+            mots=c1.text_input("Mots-clés",key=f"{ptype}_mots")
+            reference=c2.text_input("Référence / DOI",key=f"{ptype}_reference")
+            lien=c3.text_input("Lien web",key=f"{ptype}_lien",placeholder="https://…")
+            statut=st.selectbox("Statut",["Disponible","En préparation","Archivé"],key=f"{ptype}_statut")
+            observations=st.text_area("Observations",key=f"{ptype}_observations")
+            ok=st.form_submit_button(f"💾 Enregistrer — {ptype}",type="primary")
+        if ok:
+            if not titre.strip():
+                st.error("Le titre est obligatoire.")
+            else:
+                q("""INSERT INTO scientific_publications(type_publication,titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,fichier,lien,statut,observations)
+                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                  (ptype,titre,auteurs,annee,domaine,projet,resume,mots,public_cible,reference,None,lien,statut,observations))
+                st.success(f"{ptype} enregistrée."); st.rerun()
+        data=df("SELECT id,type_publication,titre,auteurs,annee,domaine,projet,reference,statut,lien FROM scientific_publications WHERE type_publication=? ORDER BY annee DESC,id DESC",(ptype,))
+        st.dataframe(data,use_container_width=True,hide_index=True)
+        export_buttons(data,ptype.lower().replace(' ','_'),ptype)
+
+    with tab_note_politique:
+        render_publication_note("Note politique", "🗒️")
+    with tab_note_synthese:
+        render_publication_note("Note de synthèse", "📋")
 
 
 def render_reports():
@@ -2645,7 +2745,7 @@ def render_reports():
     st.header("📊 Rapports, statistiques et exports")
     st.caption(
         "Rapport premium global aligné sur l'organisation actuelle : "
-        "Communication • Documentations (Biblio, Consultations, Personnes, Prêts) • Résultat scientifique (publications et Documentation IST) • Visiteurs • Valorisation chercheurs. "
+        "Communication • Documentations (Biblio, Consultations, Personnes, Prêts) • Résultats scientifiques (documents, publications, notes et Documentation IST) • Visiteurs • Valorisation chercheurs. "
         "Toutes les données déjà enregistrées sont reprises, y compris les anciennes saisies."
     )
 
@@ -2823,11 +2923,13 @@ def render_reports():
         ("Actions de communication", len(communications)),
         ("Presse & médias", len(media_df)),
         ("Audiovisuel", len(av)),
+        ("Compléments de communication — total", len(communications) + len(media_df) + len(av) + len(formats)),
         ("Documents IST", len(documents)),
         ("Consultations", len(consultations)),
         ("Prêts", len(loans)),
         ("Résultats scientifiques", len(scientific)),
         ("Publications scientifiques", len(publications)),
+        ("Résultats scientifiques — total", len(scientific) + len(publications) + len(documents)),
         ("Visiteurs", len(visits)),
         ("Valorisations", len(research_data)),
         ("Profils chercheurs", len(profiles)),
@@ -2847,6 +2949,12 @@ def render_reports():
         "Médias": media_df,
         "Audiovisuel": av,
         "Formats": formats,
+        "Compléments de communication": pd.concat([
+            frame.assign(Origine=label) for label, frame in [
+                ("Actions de communication", communications), ("Presse et médias", media_df),
+                ("Productions audiovisuelles", av), ("Formats", formats)
+            ]
+        ], ignore_index=True, sort=False),
         "Documents IST": documents,
         "Bibliothèque": library,
         "Consultations": consultations,
@@ -2854,6 +2962,12 @@ def render_reports():
         "Personnes": people,
         "Résultats scientifiques": scientific,
         "Publications scientifiques": publications,
+        "Résultats scientifiques — regroupés": pd.concat([
+            frame.assign(Origine=label) for label, frame in [
+                ("Documents scientifiques", scientific), ("Publications scientifiques", publications),
+                ("Documentation IST", documents)
+            ]
+        ], ignore_index=True, sort=False),
         "Notes politiques": publications[publications["type_publication"] == "Note politique"].copy() if not publications.empty and "type_publication" in publications.columns else pd.DataFrame(columns=publications.columns),
         "Notes de synthèse": publications[publications["type_publication"] == "Note de synthèse"].copy() if not publications.empty and "type_publication" in publications.columns else pd.DataFrame(columns=publications.columns),
         "Visiteurs": visits,
@@ -2910,7 +3024,7 @@ def render_reports():
     # ============================================================
     st.markdown("### 👁️ Aperçu du rapport")
 
-    with st.expander("📣 02 — Communication — Activités au centre", expanded=True):
+    with st.expander("📣 02 — Communication — activités et Compléments de communication", expanded=True):
         st.markdown("**🗓️ Activités enregistrées — centre de Communication**")
         st.dataframe(
             activities,
@@ -2922,12 +3036,14 @@ def render_reports():
             use_container_width=True,
             hide_index=True,
         )
-        st.markdown("**📰 Presse & médias**")
+        st.markdown("**📚 Compléments de communication — 📰 Presse & médias**")
         st.dataframe(media_df, use_container_width=True, hide_index=True)
         st.markdown("**🎥 Audiovisuel**")
         st.dataframe(av, use_container_width=True, hide_index=True)
         st.markdown("**🧩 Formats de communication**")
         st.dataframe(formats, use_container_width=True, hide_index=True)
+        with st.expander("📊 Tableau combiné — Compléments de communication", expanded=False):
+            st.dataframe(report_data["Compléments de communication"], use_container_width=True, hide_index=True)
 
     with st.expander("📚 03 — Documentations"):
         st.markdown("**📚 Biblio**")
@@ -2939,8 +3055,8 @@ def render_reports():
         st.markdown("**📕 Prêts & retours**")
         st.dataframe(loans, use_container_width=True, hide_index=True)
 
-    with st.expander("🔬 04 — Résultat scientifique"):
-        st.markdown("**Résultats scientifiques**")
+    with st.expander("🔬 04 — Résultats scientifiques"):
+        st.markdown("**Documents scientifiques — fiches, mémoires, thèses et rapports**")
         st.dataframe(scientific, use_container_width=True, hide_index=True)
         st.markdown("**Publication scientifique — toutes les publications**")
         st.dataframe(publications, use_container_width=True, hide_index=True)
@@ -2950,6 +3066,8 @@ def render_reports():
         st.dataframe(report_data["Notes de synthèse"], use_container_width=True, hide_index=True)
         st.markdown("**📄 Documentation IST**")
         st.dataframe(documents, use_container_width=True, hide_index=True)
+        with st.expander("📊 Tableau combiné — Résultats scientifiques", expanded=False):
+            st.dataframe(report_data["Résultats scientifiques — regroupés"], use_container_width=True, hide_index=True)
 
     with st.expander("👥 05 — Visiteurs"):
         st.dataframe(
@@ -2982,7 +3100,7 @@ elif page == "📣 Communication":
 elif page == "📚 Documentations":
     render_documentations()
     render_record_manager(page)
-elif page == "🔬 Résultat scientifique":
+elif page == "🔬 Résultats scientifiques":
     render_scientific_results()
     render_record_manager(page)
 elif page == "👥 Visiteurs":
@@ -2996,4 +3114,4 @@ elif page == "👤 Profil":
 elif page == "📊 Rapports & exports":
     render_reports()
 
-st.caption("ISRA • CRA — IST et Communication | Organisation : Communication • Documentations (Biblio, Consultations, Personnes, Prêts) • Résultat scientifique (publications et Documentation IST) | Formats : PDF • Excel • CSV")
+st.caption("ISRA • CRA — IST et Communication | Organisation : Communication • Documentations (Biblio, Consultations, Personnes, Prêts) • Résultats scientifiques (documents, publications, notes et Documentation IST) | Formats : PDF • Excel • CSV")
