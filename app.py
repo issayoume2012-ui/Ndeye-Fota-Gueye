@@ -3002,6 +3002,18 @@ def render_reports():
             "responsable":"", "lien":"lien_reference", "observations":"observations"}),
     ], ignore_index=True, sort=False)
 
+    # Répartition explicite des résultats scientifiques selon les 7 onglets métier.
+    # Chaque rubrique est présentée séparément dans le rapport premium, le tableau de bord,
+    # l'aperçu et les exports. Le registre Publications & Documentation IST reste unifié.
+    _scientific_type = scientific.get("type_resultat", pd.Series(index=scientific.index, dtype="object")).fillna("").astype(str).str.strip().str.casefold()
+    fiches_techniques = scientific[_scientific_type.isin(["fiche technique", "fiches techniques"])].copy()
+    memoires = scientific[_scientific_type.isin(["mémoire", "memoire", "mémoires", "memoires"])].copy()
+    theses = scientific[_scientific_type.isin(["thèse", "these", "thèses", "theses"])].copy()
+    rapports_scientifiques = scientific[_scientific_type.str.contains("rapport", na=False)].copy()
+    # Les libellés non reconnus restent visibles dans le registre global pour éviter toute perte.
+    scientific_classified = pd.concat([fiches_techniques, memoires, theses, rapports_scientifiques]).drop_duplicates(subset=["id"] if "id" in scientific.columns else None)
+    scientific_autres = scientific[~scientific.index.isin(scientific_classified.index)].copy()
+
     # ============================================================
     # INDICATEURS — données de la période sélectionnée
     # ============================================================
@@ -3038,17 +3050,6 @@ def render_reports():
         with cols[i % 4]:
             st.metric(label, val)
 
-    # Répartition explicite des résultats scientifiques selon les 7 onglets métier.
-    # Chaque rubrique est présentée séparément dans le rapport premium, le tableau de bord,
-    # l'aperçu et les exports. Le registre Publications & Documentation IST reste unifié.
-    _scientific_type = scientific.get("type_resultat", pd.Series(index=scientific.index, dtype="object")).fillna("").astype(str).str.strip().str.casefold()
-    fiches_techniques = scientific[_scientific_type.isin(["fiche technique", "fiches techniques"])].copy()
-    memoires = scientific[_scientific_type.isin(["mémoire", "memoire", "mémoires", "memoires"])].copy()
-    theses = scientific[_scientific_type.isin(["thèse", "these", "thèses", "theses"])].copy()
-    rapports_scientifiques = scientific[_scientific_type.str.contains("rapport", na=False)].copy()
-    # Les libellés non reconnus restent visibles dans le registre global pour éviter toute perte.
-    scientific_classified = pd.concat([fiches_techniques, memoires, theses, rapports_scientifiques]).drop_duplicates(subset=["id"] if "id" in scientific.columns else None)
-    scientific_autres = scientific[~scientific.index.isin(scientific_classified.index)].copy()
 
     # ============================================================
     # RAPPORT PREMIUM COMPLET
