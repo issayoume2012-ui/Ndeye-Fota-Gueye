@@ -1576,13 +1576,13 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     kpi_order = [
         ("Activités", report_data.get("Activités")),
         ("Compléments de communication — registre unique", report_data.get("Compléments de communication", pd.DataFrame())),
-        ("Publications scientifiques & Documentation IST — registre unique", report_data.get("Publications & Documentation IST", pd.DataFrame())),
+        ("Publications scientifiques", report_data.get("Publications scientifiques — ressources", pd.DataFrame())),
         ("Bibliothèque", report_data.get("Bibliothèque")),
         ("🧾 Fiches techniques", report_data.get("Fiches techniques", pd.DataFrame())),
         ("📘 Mémoires", report_data.get("Mémoires", pd.DataFrame())),
         ("🎓 Thèses", report_data.get("Thèses", pd.DataFrame())),
         ("📑 Rapports scientifiques", report_data.get("Rapports scientifiques", pd.DataFrame())),
-        ("📰 Publications scientifiques & Documentation IST", report_data.get("Publications & Documentation IST", pd.DataFrame())),
+        ("📰 Publications scientifiques", report_data.get("Publications scientifiques — ressources", pd.DataFrame())),
         ("🗒️ Notes politiques", report_data.get("Notes politiques", pd.DataFrame())),
         ("📋 Notes de synthèse", report_data.get("Notes de synthèse", pd.DataFrame())),
         ("Résultats scientifiques — total", report_data.get("Résultats scientifiques — regroupés", pd.DataFrame())),
@@ -1620,7 +1620,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
              "Bibliothèque", "Consultations", "Prêts", "Personnes"
          ]))],
         ["Résultats scientifiques", "7 rubriques : fiches techniques, mémoires, thèses, rapports, publications & Documentation IST, notes politiques et notes de synthèse",
-         str(sum(len(report_data.get(k, pd.DataFrame())) for k in ["Fiches techniques", "Mémoires", "Thèses", "Rapports scientifiques", "Résultats scientifiques — autres types", "Publications & Documentation IST", "Notes politiques", "Notes de synthèse"]))],
+         str(sum(len(report_data.get(k, pd.DataFrame())) for k in ["Fiches techniques", "Mémoires", "Thèses", "Rapports scientifiques", "Résultats scientifiques — autres types", "Publications scientifiques", "Notes politiques", "Notes de synthèse"]))],
         ["Visiteurs", "Registre des visiteurs",
          str(len(report_data.get("Visiteurs", pd.DataFrame())))],
         ["Valorisation chercheurs", "Profils et actions de valorisation",
@@ -1720,6 +1720,8 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
          report_data.get("Prêts")),
         ("3.4", "Personnes", "Personnes enregistrées comme acteurs documentaires.",
          report_data.get("Personnes")),
+        ("3.5", "Biblio/Documentation IST", "Ressources IST et références documentaires.",
+         report_data.get("Biblio/Documentation IST")),
     ]
 
     for num, title, desc, frame in documentation_sections:
@@ -1747,7 +1749,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
         ("4.2", "📘 Mémoires", "Mémoires enregistrés dans le registre des résultats scientifiques.", report_data.get("Mémoires")),
         ("4.3", "🎓 Thèses", "Thèses enregistrées dans le registre des résultats scientifiques.", report_data.get("Thèses")),
         ("4.4", "📑 Rapports", "Rapports scientifiques enregistrés dans le registre des résultats scientifiques.", report_data.get("Rapports scientifiques")),
-        ("4.5", "📰 Publications scientifiques & Documentation IST", "Registre unifié présentant ensemble les publications scientifiques et les ressources de Documentation IST.", report_data.get("Publications & Documentation IST")),
+        ("4.5", "📰 Publications scientifiques", "Publications scientifiques enregistrées dans le registre des publications.", report_data.get("Publications scientifiques — ressources")),
         ("4.6", "🗒️ Notes politiques", "Notes politiques enregistrées dans le registre des publications scientifiques.", report_data.get("Notes politiques")),
         ("4.7", "📋 Notes de synthèse", "Notes de synthèse enregistrées dans le registre des publications scientifiques.", report_data.get("Notes de synthèse")),
         ("Annexe", "Autres types de résultats scientifiques", "Enregistrements dont le type ne correspond pas aux six libellés de résultats scientifiques classifiés ; conservés pour garantir l’intégralité des données.", report_data.get("Résultats scientifiques — autres types")),
@@ -1895,13 +1897,12 @@ CRUD_TABLES_BY_PAGE = {
         "Formats de communication": "communication_formats",
     },
     "📚 Documentations": {
-        "Catalogue bibliothèque": "library_items", "Personnes": "people",
-        "Consultations": "consultations", "Prêts et retours": "loans",
+        "Catalogue bibliothèque": "library_items", "Biblio/Documentation IST": "documents",
+        "Personnes": "people", "Consultations": "consultations", "Prêts et retours": "loans",
     },
     "👥 Visiteurs": {"Registre des visiteurs": "library_visits"},
     "🔬 Résultats scientifiques": {
         "Résultats scientifiques": "scientific_results", "Publications scientifiques": "scientific_publications",
-        "Documentation IST": "documents",
     },
     "🧬 Valorisation chercheurs": {
         "Profils chercheurs": "researcher_profiles", "Actions de valorisation": "researcher_valorization",
@@ -2035,14 +2036,15 @@ def render_dashboard():
         ("Participants", scalar("SELECT COUNT(*) FROM participants")),
         ("Personnes", scalar("SELECT COUNT(*) FROM people")),
         ("Compléments de communication — registre unique", scalar("SELECT (SELECT COUNT(*) FROM communications) + (SELECT COUNT(*) FROM media) + (SELECT COUNT(*) FROM audiovisual) + (SELECT COUNT(*) FROM communication_formats)")),
-        ("Publications scientifiques & Documentation IST", scalar("SELECT (SELECT COUNT(*) FROM documents) + (SELECT COUNT(*) FROM scientific_publications WHERE type_publication NOT IN ('Note politique','Note de synthèse'))")),
+        ("Biblio/Documentation IST", scalar("SELECT COUNT(*) FROM documents")),
+        ("Publications scientifiques", scalar("SELECT COUNT(*) FROM scientific_publications WHERE type_publication NOT IN ('Note politique','Note de synthèse')")),
         ("Documents bibliothèque", scalar("SELECT COUNT(*) FROM library_items")),
         ("Consultations", scalar("SELECT COUNT(*) FROM consultations")),
         ("🧾 Fiches techniques", scalar("SELECT COUNT(*) FROM scientific_results WHERE LOWER(type_resultat) IN ('fiche technique','fiches techniques')")),
         ("📘 Mémoires", scalar("SELECT COUNT(*) FROM scientific_results WHERE LOWER(type_resultat) IN ('mémoire','memoire','mémoires','memoires')")),
         ("🎓 Thèses", scalar("SELECT COUNT(*) FROM scientific_results WHERE LOWER(type_resultat) IN ('thèse','these','thèses','theses')")),
         ("📑 Rapports scientifiques", scalar("SELECT COUNT(*) FROM scientific_results WHERE LOWER(type_resultat) LIKE '%rapport%'")),
-        ("📰 Publications scientifiques & Documentation IST", scalar("SELECT (SELECT COUNT(*) FROM documents) + (SELECT COUNT(*) FROM scientific_publications WHERE type_publication NOT IN ('Note politique','Note de synthèse'))")),
+        ("📰 Publications scientifiques", scalar("SELECT COUNT(*) FROM scientific_publications WHERE type_publication NOT IN ('Note politique','Note de synthèse')")),
         ("🗒️ Notes politiques", scalar("SELECT COUNT(*) FROM scientific_publications WHERE type_publication='Note politique'")),
         ("📋 Notes de synthèse", scalar("SELECT COUNT(*) FROM scientific_publications WHERE type_publication='Note de synthèse'")),
         ("Résultats scientifiques — total", scalar("SELECT (SELECT COUNT(*) FROM scientific_results) + (SELECT COUNT(*) FROM scientific_publications) + (SELECT COUNT(*) FROM documents)")),
@@ -2368,12 +2370,57 @@ def render_communication():
     st.dataframe(data,use_container_width=True,hide_index=True)
     export_buttons(data,"complements_communication_unifies","Compléments de communication — registre unique CRA/ISRA")
 
+    # Compléments filtrés par activité sélectionnée : cette vue est destinée
+    # aux rapports téléchargeables de l'activité, sans modifier le registre global.
+    st.markdown("### 🎯 Compléments associés à une activité")
+    if actmap:
+        selected_activity = st.selectbox(
+            "Sélectionner une activité pour afficher ses compléments de communication",
+            list(actmap.keys()), key="communication_activity_report_selector"
+        )
+        selected_activity_id = actmap[selected_activity]
+        complements = df("""
+            SELECT 'Action de communication' AS categorie, titre,
+                   type_action AS type, plateforme AS support,
+                   date_publication::text AS date, lien, vues, reactions,
+                   commentaires, partages, telechargements, observations
+            FROM communications WHERE activity_id = ?
+            UNION ALL
+            SELECT 'Presse et médias' AS categorie, media_name AS titre,
+                   type_intervention AS type, media_type AS support,
+                   date_intervention::text AS date, lien,
+                   NULL::bigint AS vues, NULL::bigint AS reactions,
+                   NULL::bigint AS commentaires, NULL::bigint AS partages,
+                   NULL::bigint AS telechargements, observations
+            FROM media WHERE activity_id = ?
+            UNION ALL
+            SELECT 'Production audiovisuelle' AS categorie, titre,
+                   type_production AS type, theme AS support,
+                   date_production::text AS date, lien,
+                   NULL::bigint AS vues, NULL::bigint AS reactions,
+                   NULL::bigint AS commentaires, NULL::bigint AS partages,
+                   NULL::bigint AS telechargements, observations
+            FROM audiovisual WHERE activity_id = ?
+            ORDER BY date DESC NULLS LAST, titre
+        """, (selected_activity_id, selected_activity_id, selected_activity_id))
+        st.caption(f"Activité sélectionnée : {selected_activity}")
+        if complements.empty:
+            st.info("Aucun complément de communication n'est encore associé à cette activité.")
+        else:
+            st.dataframe(complements, use_container_width=True, hide_index=True)
+        export_buttons(
+            complements, f"communication_activite_{selected_activity_id}",
+            f"Compléments de communication — {selected_activity}"
+        )
+    else:
+        st.info("Enregistrez d'abord une activité pour pouvoir consulter ses compléments.")
+
 def render_documentations():
-    """Espace Documentation organisé en quatre onglets métier indépendants."""
+    """Espace Documentation organisé en cinq onglets métier indépendants."""
     st.header("📚 Documentations")
     st.caption("Gestion séparée de la bibliothèque, des consultations, des personnes et des prêts/retours.")
-    tab_biblio, tab_consult, tab_people, tab_loans = st.tabs([
-        "📚 Biblio", "📖 Consultations", "👥 Personnes", "📕 Prêts & retours"
+    tab_biblio, tab_ist, tab_consult, tab_people, tab_loans = st.tabs([
+        "📚 Biblio", "📚 Biblio/Documentation IST", "📖 Consultations", "👥 Personnes", "📕 Prêts & retours"
     ])
 
     with tab_biblio:
@@ -2404,6 +2451,45 @@ def render_documentations():
         catalog=df("SELECT id,inventaire,cote,titre,auteurs,annee,type_document,exemplaires,disponibles,localisation,etat FROM library_items ORDER BY titre")
         st.dataframe(catalog,use_container_width=True,hide_index=True)
         export_buttons(catalog,"catalogue_bibliotheque","Catalogue de la bibliothèque CRA/ISRA")
+
+    with tab_ist:
+        st.subheader("📚 Biblio/Documentation IST")
+        st.caption("Enregistrez et consultez les ressources IST ici, séparément des résultats scientifiques.")
+        with st.form("documentation_ist_form"):
+            c1, c2, c3 = st.columns(3)
+            titre_ist = c1.text_input("Titre *", key="docist_titre")
+            auteurs_ist = c2.text_input("Auteur(s)", key="docist_auteurs")
+            annee_ist = c3.number_input("Année", 1900, 2100, value=date.today().year, key="docist_annee")
+            c1, c2, c3 = st.columns(3)
+            type_ist = c1.selectbox("Type de document", ["Article scientifique", "Ouvrage", "Chapitre d’ouvrage", "Communication scientifique", "Actes de conférence", "Rapport", "Mémoire", "Thèse", "Document technique", "Guide", "Brochure", "Plaquette", "Revue / bulletin", "Autre"], key="docist_type")
+            theme_ist = c2.text_input("Thématique / domaine", key="docist_theme")
+            chercheur_ist = c3.text_input("Chercheur associé", key="docist_chercheur")
+            projet_ist = st.text_input("Projet associé", key="docist_projet")
+            resume_ist = st.text_area("Résumé", key="docist_resume")
+            c1, c2, c3 = st.columns(3)
+            mots_ist = c1.text_input("Mots-clés", key="docist_mots")
+            langue_ist = c2.text_input("Langue", value="Français", key="docist_langue")
+            pages_ist = c3.number_input("Nombre de pages", 0, step=1, key="docist_pages")
+            c1, c2 = st.columns(2)
+            reference_ist = c1.text_input("Référence bibliographique / DOI", key="docist_reference")
+            lien_ist = c2.text_input("Lien web / DOI / lien institutionnel", placeholder="https://…", key="docist_lien")
+            statut_ist = st.selectbox("Statut", ["Disponible", "À vérifier", "En préparation", "Archivé"], key="docist_statut")
+            observations_ist = st.text_area("Observations", key="docist_observations")
+            submit_ist = st.form_submit_button("💾 Enregistrer la documentation IST", type="primary")
+        if submit_ist:
+            if not titre_ist.strip():
+                st.error("Le titre est obligatoire.")
+            else:
+                q("""INSERT INTO documents(titre,auteurs,annee,type_document,thematique,mots_cles,chercheur_associe,projet,resume,langue,pages,reference,fichier,lien,statut,observations)
+                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                  (titre_ist, auteurs_ist, annee_ist, type_ist, theme_ist, mots_ist, chercheur_ist, projet_ist, resume_ist, langue_ist, pages_ist, reference_ist, None, lien_ist, statut_ist, observations_ist))
+                st.success("Documentation IST enregistrée.")
+                st.rerun()
+        ist_data = df("""SELECT id,titre,auteurs,annee,type_document,thematique,mots_cles,
+                                chercheur_associe,projet,resume,langue,pages,reference,lien,statut,observations
+                         FROM documents ORDER BY annee DESC, titre""")
+        st.dataframe(ist_data, use_container_width=True, hide_index=True)
+        export_buttons(ist_data, "biblio_documentation_ist", "Biblio/Documentation IST CRA/ISRA")
 
     with tab_consult:
         st.subheader("📖 Consultations des documents")
@@ -2610,6 +2696,39 @@ def render_researchers():
         st.dataframe(research_data,use_container_width=True,hide_index=True)
         export_buttons(research_data,"valorisation_chercheurs","Valorisation des chercheurs CRA/ISRA")
 
+        st.markdown("### 🎯 Actions de valorisation par chercheur")
+        if not profiles.empty:
+            researcher_options = {
+                f"{r.nom} {r.prenom or ''} — {r.grade_fonction or ''}".strip(): int(r.id)
+                for r in profiles.itertuples()
+            }
+            selected_researcher = st.selectbox(
+                "Sélectionner un chercheur pour afficher ses actions de valorisation",
+                list(researcher_options.keys()), key="valorization_researcher_report_selector"
+            )
+            selected_researcher_id = researcher_options[selected_researcher]
+            researcher_actions = df("""
+                SELECT rp.nom || ' ' || COALESCE(rp.prenom,'') AS chercheur,
+                       rv.date_action, rv.domaine, rv.thematique, rv.projet,
+                       rv.type_valorisation, rv.support, rv.lien, rv.observations
+                FROM researcher_valorization rv
+                JOIN researcher_valorization_researchers rvr ON rvr.valorization_id = rv.id
+                JOIN researcher_profiles rp ON rp.id = rvr.researcher_id
+                WHERE rp.id = ?
+                ORDER BY rv.date_action DESC, rv.id DESC
+            """, (selected_researcher_id,))
+            st.caption(f"Actions enregistrées pour : {selected_researcher}")
+            if researcher_actions.empty:
+                st.info("Aucune action de valorisation n'est encore associée à ce chercheur.")
+            else:
+                st.dataframe(researcher_actions, use_container_width=True, hide_index=True)
+            export_buttons(
+                researcher_actions, f"valorisation_chercheur_{selected_researcher_id}",
+                f"Actions de valorisation — {selected_researcher}"
+            )
+        else:
+            st.info("Créez d'abord un profil chercheur pour consulter ses actions de valorisation.")
+
 def render_profile():
     st.markdown("""
     <div class="hero" style="min-height:210px;background:
@@ -2630,11 +2749,11 @@ def render_profile():
     # -----------------------------
 
 def render_scientific_results():
-    """Espace Résultats scientifiques organisé en sept onglets métier."""
+    """Espace Résultats scientifiques organisé en six onglets métier."""
     st.header("🔬 Résultats scientifiques")
     st.caption(
         "Un espace unique pour les fiches techniques, mémoires, thèses, rapports, "
-        "publications scientifiques, documentation IST, notes politiques et notes de synthèse. "
+        "publications scientifiques, notes politiques et notes de synthèse. "
         "Privilégiez les liens web, DOI et liens institutionnels : aucun fichier n'est téléversé."
     )
     st.markdown(
@@ -2643,11 +2762,10 @@ def render_scientific_results():
         unsafe_allow_html=True,
     )
 
-    # Sept onglets : Publication scientifique et Documentation IST sont réunies
-    # dans un même onglet, sans supprimer leurs formulaires, registres ou exports.
+    # La Documentation IST est désormais gérée dans Documentations > Biblio/Documentation IST.
     tab_fiche, tab_memoire, tab_these, tab_rapport, tab_publications_ist, tab_note_politique, tab_note_synthese = st.tabs([
         "🧾 Fiches techniques", "📘 Mémoires", "🎓 Thèses", "📑 Rapports",
-        "📰 Publications scientifiques & Documentation IST", "🗒️ Notes politiques", "📋 Notes de synthèse"
+        "📰 Publications scientifiques", "🗒️ Notes politiques", "📋 Notes de synthèse"
     ])
 
     def render_result_form(label):
@@ -2694,10 +2812,10 @@ def render_scientific_results():
         render_result_form("Rapport")
 
     with tab_publications_ist:
-        st.subheader("📰 Publications scientifiques & Documentation IST — registre unique")
-        st.caption("Un seul formulaire et un seul tableau regroupent les publications scientifiques et les ressources IST. Le type de ressource détermine le registre historique dans lequel les données sont conservées.")
+        st.subheader("📰 Publications scientifiques")
+        st.caption("Les publications scientifiques sont gérées ici. Les ressources IST sont désormais dans Documentations > Biblio/Documentation IST.")
         with st.form("publications_ist_contenu_unique_form"):
-            origine=st.selectbox("Nature de la ressource",["Publication scientifique","Documentation IST"])
+            origine="Publication scientifique"
             c1,c2,c3=st.columns(3)
             titre=c1.text_input("Titre *",key="pubist_titre")
             auteurs=c2.text_input("Auteur(s)",key="pubist_auteurs")
@@ -2723,32 +2841,21 @@ def render_scientific_results():
                 st.error("Le titre est obligatoire.")
             else:
                 try:
-                    if origine == "Publication scientifique":
-                        q("""INSERT INTO scientific_publications(type_publication,titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,fichier,lien,statut,observations)
-                             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(type_ressource,titre,auteurs,annee,domaine,projet,resume,mots,public_cible,reference,None,lien,statut,observations))
-                    else:
-                        q("""INSERT INTO documents(titre,auteurs,annee,type_document,thematique,mots_cles,chercheur_associe,projet,resume,langue,pages,reference,fichier,lien,statut,observations)
-                             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(titre,auteurs,annee,type_ressource,domaine,mots,public_cible,projet,resume,langue,pages,reference,None,lien,statut,observations))
-                    st.success("Ressource enregistrée dans le registre unique.")
+                    q("""INSERT INTO scientific_publications(type_publication,titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,fichier,lien,statut,observations)
+                         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(type_ressource,titre,auteurs,annee,domaine,projet,resume,mots,public_cible,reference,None,lien,statut,observations))
+                    st.success("Publication scientifique enregistrée.")
                     st.rerun()
                 except Exception as exc:
                     st.error(f"Impossible d'enregistrer la ressource : {exc}")
 
-        # Normalisation des deux registres dans un tableau unique visible et exportable.
-        pubs=df("""SELECT id, 'Publication scientifique' AS origine, type_publication AS type,
-                       titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,lien,statut,observations
-                    FROM scientific_publications
-                    WHERE type_publication NOT IN ('Note politique','Note de synthèse')""")
-        docs=df("""SELECT id, 'Documentation IST' AS origine, type_document AS type,
-                       titre,auteurs,annee,thematique AS domaine,projet,resume,mots_cles,
-                       chercheur_associe AS public_cible,reference,lien,statut,observations
-                    FROM documents""")
-        combined=pd.concat([pubs,docs],ignore_index=True,sort=False)
-        if not combined.empty and "annee" in combined.columns:
-            combined=combined.sort_values(by=["annee","titre"],ascending=[False,True],na_position="last")
-        st.subheader("📋 Registre unique — publications et documentation IST")
-        st.dataframe(combined,use_container_width=True,hide_index=True)
-        export_buttons(combined,"publications_documentation_ist","Publications scientifiques & Documentation IST — registre unique CRA/ISRA")
+        pubs=df("""SELECT id, type_publication AS type, titre,auteurs,annee,domaine,projet,resume,
+                          mots_cles,public_cible,reference,lien,statut,observations
+                   FROM scientific_publications
+                   WHERE type_publication NOT IN ('Note politique','Note de synthèse')
+                   ORDER BY annee DESC,id DESC""")
+        st.subheader("📋 Registre des publications scientifiques")
+        st.dataframe(pubs,use_container_width=True,hide_index=True)
+        export_buttons(pubs,"publications_scientifiques","Publications scientifiques CRA/ISRA")
 
     def render_publication_note(ptype, icon):
         st.subheader(f"{icon} {ptype}")
@@ -2792,7 +2899,7 @@ def render_reports():
     st.header("📊 Rapports, statistiques et exports")
     st.caption(
         "Rapport premium global aligné sur l'organisation actuelle : "
-        "Communication • Documentations (Biblio, Consultations, Personnes, Prêts) • Résultats scientifiques (7 rubriques métier distinctes, dont un registre unique Publications scientifiques & Documentation IST) • Visiteurs • Valorisation chercheurs. "
+        "Communication • Documentations (Biblio, Biblio/Documentation IST, Consultations, Personnes, Prêts) • Résultats scientifiques (publications scientifiques, fiches techniques, mémoires, thèses, rapports et notes) • Visiteurs • Valorisation chercheurs. "
         "Choisissez une durée prédéfinie ou saisissez vos dates. Les données datées, l’aperçu, le PDF premium et les exports sont filtrés sur la période sélectionnée."
     )
 
@@ -3046,18 +3153,14 @@ def render_reports():
     publications_sans_notes = publications[
         ~publications["type_publication"].isin(["Note politique", "Note de synthèse"])
     ].copy() if not publications.empty and "type_publication" in publications.columns else pd.DataFrame()
-    publications_ist = pd.concat([
-        _normalized_resource_frame(publications_sans_notes, "Publication scientifique", {
-            "Type":"type_publication", "Titre":"titre", "Auteurs":"auteurs", "Année":"annee",
-            "Domaine / thématique":"domaine", "Projet":"projet", "Résumé":"resume", "Mots-clés":"mots_cles",
-            "Public cible / chercheur associé":"public_cible", "Référence / DOI":"reference", "Lien web":"lien",
-            "Statut":"statut", "Observations":"observations"}),
-        _normalized_resource_frame(documents, "Documentation IST", {
-            "Type":"type_document", "Titre":"titre", "Auteurs":"auteurs", "Année":"annee",
-            "Domaine / thématique":"thematique", "Projet":"projet", "Résumé":"resume", "Mots-clés":"mots_cles",
-            "Public cible / chercheur associé":"chercheur_associe", "Langue":"langue", "Pages":"pages",
-            "Référence / DOI":"reference", "Lien web":"lien", "Statut":"statut", "Observations":"observations"}),
-    ], ignore_index=True, sort=False)
+    # Les publications scientifiques restent dans les résultats scientifiques ;
+    # les documents IST sont désormais présentés dans Documentations.
+    publications_ist = _normalized_resource_frame(publications_sans_notes, "Publication scientifique", {
+        "Type":"type_publication", "Titre":"titre", "Auteurs":"auteurs", "Année":"annee",
+        "Domaine / thématique":"domaine", "Projet":"projet", "Résumé":"resume", "Mots-clés":"mots_cles",
+        "Public cible / chercheur associé":"public_cible", "Référence / DOI":"reference", "Lien web":"lien",
+        "Statut":"statut", "Observations":"observations"})
+
 
     def _normalized_communication_frame(frame, origin, mapping):
         columns = ["Origine", "categorie", "titre", "type", "date", "canal", "responsable", "lien", "observations"]
@@ -3087,9 +3190,8 @@ def render_reports():
             "responsable":"", "lien":"lien_reference", "observations":"observations"}),
     ], ignore_index=True, sort=False)
 
-    # Répartition explicite des résultats scientifiques selon les 7 onglets métier.
-    # Chaque rubrique est présentée séparément dans le rapport premium, le tableau de bord,
-    # l'aperçu et les exports. Le registre Publications & Documentation IST reste unifié.
+    # Répartition explicite des résultats scientifiques par rubrique métier.
+    # La Documentation IST est conservée séparément dans Documentations.
     _scientific_type = scientific.get("type_resultat", pd.Series(index=scientific.index, dtype="object")).fillna("").astype(str).str.strip().str.casefold()
     fiches_techniques = scientific[_scientific_type.isin(["fiche technique", "fiches techniques"])].copy()
     memoires = scientific[_scientific_type.isin(["mémoire", "memoire", "mémoires", "memoires"])].copy()
@@ -3114,17 +3216,18 @@ def render_reports():
     vals = [
         ("Activités", len(activities)),
         ("Compléments de communication — registre unique", len(communication_unifiee)),
-        ("Publications scientifiques & Documentation IST — registre unique", len(publications_ist)),
+        ("Biblio/Documentation IST", len(documents)),
+        ("Publications scientifiques", len(publications_ist)),
         ("Consultations", len(consultations)),
         ("Prêts", len(loans)),
         ("🧾 Fiches techniques", len(fiches_techniques)),
         ("📘 Mémoires", len(memoires)),
         ("🎓 Thèses", len(theses)),
         ("📑 Rapports scientifiques", len(rapports_scientifiques)),
-        ("📰 Publications scientifiques & Documentation IST", len(publications_ist)),
+        ("📰 Publications scientifiques", len(publications_ist)),
         ("🗒️ Notes politiques", len(publications[publications["type_publication"] == "Note politique"]) if not publications.empty and "type_publication" in publications.columns else 0),
         ("📋 Notes de synthèse", len(publications[publications["type_publication"] == "Note de synthèse"]) if not publications.empty and "type_publication" in publications.columns else 0),
-        ("Résultats scientifiques — total", len(scientific) + len(publications_ist) + len(publications[publications["type_publication"].isin(["Note politique", "Note de synthèse"])] if not publications.empty and "type_publication" in publications.columns else pd.DataFrame())),
+        ("Résultats scientifiques — total", len(scientific) + len(publications[publications["type_publication"].isin(["Note politique", "Note de synthèse"])] if not publications.empty and "type_publication" in publications.columns else pd.DataFrame())),
         ("Visiteurs", len(visits)),
         ("Valorisations", len(research_data)),
         ("Profils chercheurs", len(profiles)),
@@ -3146,8 +3249,8 @@ def render_reports():
         "Audiovisuel": av,
         "Formats": formats,
         "Compléments de communication": communication_unifiee,
-        "Documents IST": documents,
-        "Publications & Documentation IST": publications_ist,
+        "Biblio/Documentation IST": documents,
+        "Publications scientifiques — ressources": publications_ist,
         "Bibliothèque": library,
         "Consultations": consultations,
         "Prêts": loans,
@@ -3205,7 +3308,7 @@ def render_reports():
     # en feuilles séparées lorsque leur contenu est déjà rassemblé dans un registre unique.
     _legacy_separate_sheets = {
         "Communication", "Médias", "Audiovisuel", "Formats",
-        "Publications scientifiques", "Documents IST",
+        "Publications scientifiques — ressources",
         "Résultats scientifiques", "Résultats scientifiques — regroupés",
     }
     # Le classeur expose les sept rubriques métier individuellement, sans feuilles
@@ -3267,7 +3370,7 @@ def render_reports():
             ("📘 Mémoires", "Mémoires"),
             ("🎓 Thèses", "Thèses"),
             ("📑 Rapports", "Rapports scientifiques"),
-            ("📰 Publications scientifiques & Documentation IST", "Publications & Documentation IST"),
+            ("📰 Publications scientifiques", "Publications scientifiques"),
             ("🗒️ Notes politiques", "Notes politiques"),
             ("📋 Notes de synthèse", "Notes de synthèse"),
         ]
@@ -3325,4 +3428,4 @@ elif page == "👤 Profil":
 elif page == "📊 Rapports & exports":
     render_reports()
 
-st.caption("ISRA • CRA — IST et Communication | Organisation : Communication • Documentations (Biblio, Consultations, Personnes, Prêts) • Résultats scientifiques (documents, publications, notes et Documentation IST) | Formats : PDF • Excel • CSV")
+st.caption("ISRA • CRA — IST et Communication | Organisation : Communication • Documentations (Biblio, Biblio/Documentation IST, Consultations, Personnes, Prêts) • Résultats scientifiques (documents, publications et notes) | Formats : PDF • Excel • CSV")
