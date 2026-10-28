@@ -702,12 +702,32 @@ def _excel_safe_dataframe(data):
 
 
 def excel_bytes(dataframes):
-    """Génère un fichier Excel robuste pour les données CRA/ISRA."""
+    """Génère un Excel robuste avec des noms d'onglets valides et uniques.
+
+    Excel limite les noms d'onglets à 31 caractères, interdit certains caractères
+    et n'autorise pas deux feuilles portant le même nom (sans distinction de casse).
+    """
     bio = io.BytesIO()
+    used_names = set()
+    invalid_chars = set('[]:*?/\\')
+
+    def unique_sheet_name(raw_name):
+        base = ''.join('_' if ch in invalid_chars else ch for ch in str(raw_name or 'Donnees')).strip("' ")
+        base = base or 'Donnees'
+        base = base[:31]
+        candidate = base
+        counter = 2
+        while candidate.casefold() in used_names:
+            suffix = f"_{counter}"
+            candidate = base[:31 - len(suffix)] + suffix
+            counter += 1
+        used_names.add(candidate.casefold())
+        return candidate
+
     with pd.ExcelWriter(bio, engine="openpyxl") as writer:
         for name, data in dataframes.items():
             safe_data = _excel_safe_dataframe(data)
-            safe_data.to_excel(writer, sheet_name=str(name)[:31], index=False)
+            safe_data.to_excel(writer, sheet_name=unique_sheet_name(name), index=False)
     return bio.getvalue()
 
 
@@ -1390,7 +1410,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
           2.4 Audiovisuel
           2.5 Formats de communication
       03. Documentations
-          3.1 Documentation IST
+          3.1 Biblio et Documentation
           3.2 Bibliothèque
           3.3 Consultations
           3.4 Prêts & retours
@@ -1399,7 +1419,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
           4.2 Mémoires
           4.3 Thèses
           4.4 Rapports
-          4.5 Publications scientifiques & Documentation IST (registre unique)
+          4.5 Publications scientifiques
           4.6 Notes politiques
           4.7 Notes de synthèse
       05. Visiteurs
@@ -1619,7 +1639,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
          str(sum(len(report_data.get(k, pd.DataFrame())) for k in [
              "Bibliothèque", "Consultations", "Prêts", "Personnes"
          ]))],
-        ["Résultats scientifiques", "7 rubriques : fiches techniques, mémoires, thèses, rapports, publications & Documentation IST, notes politiques et notes de synthèse",
+        ["Résultats scientifiques", "Fiches techniques, mémoires, thèses, rapports, publications, notes politiques et notes de synthèse",
          str(sum(len(report_data.get(k, pd.DataFrame())) for k in ["Fiches techniques", "Mémoires", "Thèses", "Rapports scientifiques", "Résultats scientifiques — autres types", "Publications scientifiques", "Notes politiques", "Notes de synthèse"]))],
         ["Visiteurs", "Registre des visiteurs",
          str(len(report_data.get("Visiteurs", pd.DataFrame())))],
@@ -2403,24 +2423,42 @@ def render_communication():
             FROM audiovisual WHERE activity_id = ?
             ORDER BY date DESC NULLS LAST, titre
         """, (selected_activity_id, selected_activity_id, selected_activity_id))
+        activity_info = df("SELECT * FROM activities WHERE id = ?", (selected_activity_id,))
         st.caption(f"Activité sélectionnée : {selected_activity}")
-        if complements.empty:
-            st.info("Aucun complément de communication n'est encore associé à cette activité.")
+        if activity_info.empty:
+            st.warning("Les informations détaillées de cette activité ne sont pas disponibles.")
+            activity_report = complements.copy()
         else:
-            st.dataframe(complements, use_container_width=True, hide_index=True)
+            activity_row = activity_info.iloc[0].to_dict()
+            activity_fields = {f"Activité — {key}": value for key, value in activity_row.items()}
+            if complements.empty:
+                activity_report = pd.DataFrame([{
+                    "Type de fiche": "Activité",
+                    **activity_fields,
+                    "Complément — catégorie": "Aucun complément associé",
+                }])
+                st.info("Aucun complément de communication n'est encore associé à cette activité. Le rapport contiendra tout de même les informations complètes de l'activité.")
+            else:
+                st.dataframe(complements, use_container_width=True, hide_index=True)
+                complement_rows = complements.to_dict(orient="records")
+                activity_report = pd.DataFrame([
+                    {"Type de fiche": "Complément de communication", **activity_fields,
+                     **{f"Complément — {key}": value for key, value in row.items()}}
+                    for row in complement_rows
+                ])
         export_buttons(
-            complements, f"communication_activite_{selected_activity_id}",
-            f"Compléments de communication — {selected_activity}"
+            activity_report, f"rapport_activite_communication_{selected_activity_id}",
+            f"Rapport complet de l’activité et de ses compléments — {selected_activity}"
         )
     else:
         st.info("Enregistrez d'abord une activité pour pouvoir consulter ses compléments.")
 
 def render_documentations():
-    """Espace Documentation organisé en cinq onglets métier indépendants."""
+    """Espace Documentation organisé en quatre onglets métier uniques."""
     st.header("📚 Documentations")
-    st.caption("Gestion séparée de la bibliothèque, des consultations, des personnes et des prêts/retours.")
-    tab_biblio, tab_ist, tab_consult, tab_people, tab_loans = st.tabs([
-        "📚 Biblio", "📚 Biblio/Documentation IST", "📖 Consultations", "👥 Personnes", "📕 Prêts & retours"
+    st.caption("Quatre espaces : Biblio et Documentation, Consultation, Personnes, et Prêts et retour.")
+    tab_biblio, tab_consult, tab_people, tab_loans = st.tabs([
+        "📚 Biblio et Documentation", "📖 Consultation", "👥 Personnes", "📕 Prêts et retour"
     ])
 
     with tab_biblio:
@@ -2452,7 +2490,8 @@ def render_documentations():
         st.dataframe(catalog,use_container_width=True,hide_index=True)
         export_buttons(catalog,"catalogue_bibliotheque","Catalogue de la bibliothèque CRA/ISRA")
 
-    with tab_ist:
+    with tab_biblio:
+        st.markdown("---")
         st.subheader("📚 Biblio/Documentation IST")
         st.caption("Enregistrez et consultez les ressources IST ici, séparément des résultats scientifiques.")
         with st.form("documentation_ist_form"):
@@ -2718,13 +2757,26 @@ def render_researchers():
                 ORDER BY rv.date_action DESC, rv.id DESC
             """, (selected_researcher_id,))
             st.caption(f"Actions enregistrées pour : {selected_researcher}")
+            researcher_profile = df("SELECT * FROM researcher_profiles WHERE id = ?", (selected_researcher_id,))
+            profile_fields = {}
+            if not researcher_profile.empty:
+                profile_fields = {f"Chercheur — {key}": value for key, value in researcher_profile.iloc[0].to_dict().items()}
             if researcher_actions.empty:
-                st.info("Aucune action de valorisation n'est encore associée à ce chercheur.")
+                st.info("Aucune action de valorisation n'est encore associée à ce chercheur. Le rapport contiendra tout de même les informations de son profil.")
+                researcher_report = pd.DataFrame([{
+                    "Type de fiche": "Profil du chercheur", **profile_fields,
+                    "Valorisation — statut": "Aucune action associée",
+                }])
             else:
                 st.dataframe(researcher_actions, use_container_width=True, hide_index=True)
+                researcher_report = pd.DataFrame([
+                    {"Type de fiche": "Action de valorisation", **profile_fields,
+                     **{f"Valorisation — {key}": value for key, value in row.items()}}
+                    for row in researcher_actions.to_dict(orient="records")
+                ])
             export_buttons(
-                researcher_actions, f"valorisation_chercheur_{selected_researcher_id}",
-                f"Actions de valorisation — {selected_researcher}"
+                researcher_report, f"rapport_valorisation_chercheur_{selected_researcher_id}",
+                f"Rapport du chercheur et de ses actions de valorisation — {selected_researcher}"
             )
         else:
             st.info("Créez d'abord un profil chercheur pour consulter ses actions de valorisation.")
@@ -2899,7 +2951,7 @@ def render_reports():
     st.header("📊 Rapports, statistiques et exports")
     st.caption(
         "Rapport premium global aligné sur l'organisation actuelle : "
-        "Communication • Documentations (Biblio, Biblio/Documentation IST, Consultations, Personnes, Prêts) • Résultats scientifiques (publications scientifiques, fiches techniques, mémoires, thèses, rapports et notes) • Visiteurs • Valorisation chercheurs. "
+        "Communication • Documentations (Biblio et Documentation, Consultation, Personnes, Prêts et retour) • Résultats scientifiques (publications scientifiques, fiches techniques, mémoires, thèses, rapports et notes) • Visiteurs • Valorisation chercheurs. "
         "Choisissez une durée prédéfinie ou saisissez vos dates. Les données datées, l’aperçu, le PDF premium et les exports sont filtrés sur la période sélectionnée."
     )
 
@@ -3268,7 +3320,6 @@ def render_reports():
                 ("Thèses", theses), ("Rapports scientifiques", rapports_scientifiques),
                 ("Autres résultats scientifiques", scientific_autres),
                 ("Publications scientifiques", publications_sans_notes),
-                ("Documentation IST", documents),
                 ("Notes politiques", publications[publications["type_publication"] == "Note politique"] if not publications.empty and "type_publication" in publications.columns else pd.DataFrame()),
                 ("Notes de synthèse", publications[publications["type_publication"] == "Note de synthèse"] if not publications.empty and "type_publication" in publications.columns else pd.DataFrame()),
             ]
