@@ -301,7 +301,7 @@ def show_login():
     <div class="login-card">
       <div class="brand-strip"><span class="brand-dot"></span><strong>ISRA • CRA</strong><span class="brand-dot"></span></div>
       <h1 style="text-align:center;color:#0b4f8a;margin-bottom:4px;">📚 Registre CRA/ISRA</h1>
-      <p style="text-align:center;color:#64748b;">Communication • Documentation • IST • Bibliothèque</p>
+      <p style="text-align:center;color:#64748b;">Communication • Catalogue documentaire unifié • IST</p>
     </div>
     """, unsafe_allow_html=True)
     with st.form("login_form", clear_on_submit=False):
@@ -593,6 +593,9 @@ def init_db():
             created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
         );
         ALTER TABLE activities ADD COLUMN IF NOT EXISTS date_fin DATE;
+        ALTER TABLE activities ADD COLUMN IF NOT EXISTS lien_ressource TEXT;
+        ALTER TABLE researcher_profiles ADD COLUMN IF NOT EXISTS photo TEXT;
+        ALTER TABLE researcher_profiles ADD COLUMN IF NOT EXISTS cv_fichier TEXT;
         UPDATE activities SET date_fin = date_activite WHERE date_fin IS NULL AND date_activite IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_activities_date ON activities(date_activite);
         CREATE INDEX IF NOT EXISTS idx_documents_year ON documents(annee);
@@ -670,6 +673,89 @@ def options_people():
 def options_items():
     rows = q("SELECT id, inventaire, titre, disponibles FROM library_items ORDER BY titre", fetch=True)
     return {f"{r['titre']} [{r['inventaire'] or r['id']}] — dispo: {r['disponibles']}": r["id"] for r in rows}
+
+
+def build_catalogue_view(library_frame, documents_frame):
+    """Fusionne visuellement le fonds bibliothèque et les ressources IST sans déplacer ni supprimer les lignes en base."""
+    columns = [
+        "Origine", "ID source", "N° inventaire", "Cote", "ISBN", "Titre", "Sous-titre",
+        "Auteur(s)", "Éditeur", "Année", "Type", "Domaine", "Thématique", "Mots-clés",
+        "Chercheur associé", "Projet", "Résumé", "Langue", "Pages", "Référence / DOI",
+        "Exemplaires", "Disponibles", "Localisation", "État", "Format", "Lien web / Drive",
+        "Statut", "Observations",
+    ]
+    rows = []
+
+    for _, r in (library_frame if library_frame is not None else pd.DataFrame()).iterrows():
+        rows.append({
+            "Origine": "Fonds bibliothèque",
+            "ID source": r.get("id", ""),
+            "N° inventaire": r.get("inventaire", ""),
+            "Cote": r.get("cote", ""),
+            "ISBN": r.get("isbn", ""),
+            "Titre": r.get("titre", ""),
+            "Sous-titre": r.get("sous_titre", ""),
+            "Auteur(s)": r.get("auteurs", ""),
+            "Éditeur": r.get("editeur", ""),
+            "Année": r.get("annee", ""),
+            "Type": r.get("type_document", ""),
+            "Domaine": r.get("domaine", ""),
+            "Thématique": r.get("thematique", ""),
+            "Mots-clés": r.get("mots_cles", ""),
+            "Chercheur associé": "",
+            "Projet": "",
+            "Résumé": r.get("resume", ""),
+            "Langue": "",
+            "Pages": "",
+            "Référence / DOI": r.get("isbn", "") or r.get("cote", ""),
+            "Exemplaires": r.get("exemplaires", 0),
+            "Disponibles": r.get("disponibles", 0),
+            "Localisation": r.get("localisation", ""),
+            "État": r.get("etat", ""),
+            "Format": r.get("format_document", ""),
+            "Lien web / Drive": r.get("lien", ""),
+            "Statut": "Disponible" if (r.get("disponibles", 0) or 0) > 0 else "Indisponible",
+            "Observations": r.get("observations", ""),
+        })
+
+    for _, r in (documents_frame if documents_frame is not None else pd.DataFrame()).iterrows():
+        rows.append({
+            "Origine": "Ressource documentaire / IST",
+            "ID source": r.get("id", ""),
+            "N° inventaire": "",
+            "Cote": "",
+            "ISBN": "",
+            "Titre": r.get("titre", ""),
+            "Sous-titre": "",
+            "Auteur(s)": r.get("auteurs", ""),
+            "Éditeur": "",
+            "Année": r.get("annee", ""),
+            "Type": r.get("type_document", ""),
+            "Domaine": r.get("thematique", ""),
+            "Thématique": r.get("thematique", ""),
+            "Mots-clés": r.get("mots_cles", ""),
+            "Chercheur associé": r.get("chercheur_associe", ""),
+            "Projet": r.get("projet", ""),
+            "Résumé": r.get("resume", ""),
+            "Langue": r.get("langue", ""),
+            "Pages": r.get("pages", ""),
+            "Référence / DOI": r.get("reference", ""),
+            "Exemplaires": "—",
+            "Disponibles": "—",
+            "Localisation": "Numérique / référence documentaire",
+            "État": "—",
+            "Format": "Numérique / référence",
+            "Lien web / Drive": r.get("lien", ""),
+            "Statut": r.get("statut", ""),
+            "Observations": r.get("observations", ""),
+        })
+
+    result = pd.DataFrame(rows, columns=columns)
+    if not result.empty:
+        result["_annee_tri"] = pd.to_numeric(result["Année"], errors="coerce")
+        result = result.sort_values(["_annee_tri", "Titre"], ascending=[False, True], na_position="last", kind="stable")
+        result = result.drop(columns=["_annee_tri"])
+    return result.reset_index(drop=True)
 
 def save_uploaded(uploaded, subdir=""):
     if not uploaded:
@@ -1444,10 +1530,10 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
           2.4 Audiovisuel
           2.5 Formats de communication
       03. Documentations
-          3.1 Biblio et Documentation
-          3.2 Bibliothèque
-          3.3 Consultations
-          3.4 Prêts & retours
+          3.1 Catalogue documentaire unifié
+          3.2 Consultations
+          3.3 Prêts & retours
+          3.4 Personnes
       04. Résultats scientifiques
           4.1 Fiches techniques
           4.2 Mémoires
@@ -1631,7 +1717,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
         ("Activités", report_data.get("Activités")),
         ("Compléments de communication — registre unique", report_data.get("Compléments de communication", pd.DataFrame())),
         ("Publications scientifiques", report_data.get("Publications scientifiques — ressources", pd.DataFrame())),
-        ("Bibliothèque", report_data.get("Bibliothèque")),
+        ("Catalogue documentaire", report_data.get("Catalogue", pd.DataFrame())),
         ("🧾 Fiches techniques", report_data.get("Fiches techniques", pd.DataFrame())),
         ("📘 Mémoires", report_data.get("Mémoires", pd.DataFrame())),
         ("🎓 Thèses", report_data.get("Thèses", pd.DataFrame())),
@@ -1669,9 +1755,9 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
         ["Espace", "Contenu", "Enregistrements"],
         ["Communication", "Activités (centre) et registre unique des compléments de communication",
          str(len(report_data.get("Activités", pd.DataFrame())) + len(report_data.get("Compléments de communication", pd.DataFrame())))],
-        ["Documentations", "Bibliothèque, consultations, prêts/retours et personnes",
+        ["Documentations", "Catalogue documentaire unique, consultations, prêts/retours et personnes",
          str(sum(len(report_data.get(k, pd.DataFrame())) for k in [
-             "Bibliothèque", "Consultations", "Prêts", "Personnes"
+             "Catalogue", "Consultations", "Prêts", "Personnes"
          ]))],
         ["Résultats scientifiques", "Fiches techniques, mémoires, thèses, rapports, publications, notes politiques et notes de synthèse",
          str(sum(len(report_data.get(k, pd.DataFrame())) for k in ["Fiches techniques", "Mémoires", "Thèses", "Rapports scientifiques", "Résultats scientifiques — autres types", "Publications scientifiques", "Notes politiques", "Notes de synthèse"]))],
@@ -1700,12 +1786,12 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
         report_data.get("Activités"),
         ["id", "date_activite", "date_fin", "duree_jours", "heure_debut", "heure_fin", "created_at",
          "titre", "type_activite", "objectifs", "description", "heures", "resultats_attendus",
-         "lieu", "responsable", "statut", "observations"],
+         "lieu", "responsable", "lien_ressource", "statut", "observations"],
         {"id":"ID", "date_activite":"Date activité", "date_fin":"Date fin", "duree_jours":"Durée (jours)",
          "heure_debut":"Heure début", "heure_fin":"Heure fin", "created_at":"Créé le",
          "titre":"Activité", "type_activite":"Type", "objectifs":"Objectifs",
          "description":"Description", "heures":"Heures", "resultats_attendus":"Résultats attendus",
-         "lieu":"Lieu", "responsable":"Responsable", "statut":"Statut", "observations":"Observations"},
+         "lieu":"Lieu", "responsable":"Responsable", "lien_ressource":"Photos / vidéos / dossier Drive", "statut":"Statut", "observations":"Observations"},
     )
     communication_pdf = _pdf_report_view(
         report_data.get("Communication"),
@@ -1761,21 +1847,19 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     # ------------------------------------------------------------
     story.extend(_pdf_section_header(
         "03", "DOCUMENTATIONS",
-        "Bibliothèque, consultations, personnes et prêts/retours.",
+        "Catalogue documentaire unifié, consultations, personnes et prêts/retours.",
         section
     ))
 
     documentation_sections = [
-        ("3.1", "Bibliothèque", "État du catalogue et des disponibilités.",
-         report_data.get("Bibliothèque")),
+        ("3.1", "Catalogue documentaire", "Registre unifié réunissant le fonds bibliothèque et les ressources documentaires / IST, sans perte des champs ni des liens enregistrés.",
+         report_data.get("Catalogue")),
         ("3.2", "Consultations", "Historique des consultations.",
          report_data.get("Consultations")),
         ("3.3", "Prêts & retours", "Suivi des emprunts et retours.",
          report_data.get("Prêts")),
         ("3.4", "Personnes", "Personnes enregistrées comme acteurs documentaires.",
          report_data.get("Personnes")),
-        ("3.5", "Biblio/Documentation IST", "Ressources IST et références documentaires.",
-         report_data.get("Biblio/Documentation IST")),
     ]
 
     for num, title, desc, frame in documentation_sections:
@@ -1794,7 +1878,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     # ------------------------------------------------------------
     story.extend(_pdf_section_header(
         "04", "RÉSULTATS SCIENTIFIQUES",
-        "Espace unique de capitalisation des documents scientifiques, publications, notes et ressources IST.",
+        "Espace de capitalisation des fiches techniques, mémoires, thèses, rapports, publications et notes scientifiques.",
         section
     ))
 
@@ -1951,7 +2035,7 @@ CRUD_TABLES_BY_PAGE = {
         "Formats de communication": "communication_formats",
     },
     "📚 Documentations": {
-        "Catalogue bibliothèque": "library_items", "Biblio/Documentation IST": "documents",
+        "Catalogue — fonds bibliothèque": "library_items", "Catalogue — ressources documentaires / IST": "documents",
         "Personnes": "people", "Consultations": "consultations", "Prêts et retours": "loans",
     },
     "👥 Visiteurs": {"Registre des visiteurs": "library_visits"},
@@ -2056,7 +2140,7 @@ st.markdown("""
 <div class="hero" style="padding:34px 38px;border-radius:26px;box-shadow:0 18px 55px rgba(11,79,138,.18);">
 <div class="hero-badge">ISRA • CRA • PLATEFORME INTERNE</div>
 <h1 style="font-size:2.45rem;letter-spacing:-.02em;">📚 IST et Communication</h1>
-<p style="font-size:1.03rem;">Pilotage de la communication, des activités, de l'IST, de la bibliothèque, des visiteurs, de la valorisation scientifique et des résultats de recherche.</p>
+<p style="font-size:1.03rem;">Pilotage de la communication, des activités, du Catalogue documentaire unifié, des visiteurs, de la valorisation scientifique et des résultats de recherche.</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -2084,41 +2168,44 @@ page = st.radio("Navigation principale", pages, horizontal=True, label_visibilit
 # RENDERERS CONSERVÉS
 # -----------------------------
 def render_dashboard():
-    today = date.today().isoformat()
+    """Tableau de bord général actualisé avec un Catalogue documentaire unique."""
+    q("UPDATE loans SET statut='En retard' WHERE statut='En cours' AND date_retour_prevue < ?", (date.today().isoformat(),))
+    catalogue_total = int(scalar("SELECT (SELECT COUNT(*) FROM library_items) + (SELECT COUNT(*) FROM documents)") or 0)
+    library_total = int(scalar("SELECT COUNT(*) FROM library_items") or 0)
+    ist_total = int(scalar("SELECT COUNT(*) FROM documents") or 0)
+    scientific_total = int(scalar("SELECT (SELECT COUNT(*) FROM scientific_results) + (SELECT COUNT(*) FROM scientific_publications)") or 0)
+
     metrics = [
         ("Activités", scalar("SELECT COUNT(*) FROM activities")),
         ("Participants", scalar("SELECT COUNT(*) FROM participants")),
         ("Personnes", scalar("SELECT COUNT(*) FROM people")),
-        ("Compléments de communication — registre unique", scalar("SELECT (SELECT COUNT(*) FROM communications) + (SELECT COUNT(*) FROM media) + (SELECT COUNT(*) FROM audiovisual) + (SELECT COUNT(*) FROM communication_formats)")),
-        ("Biblio/Documentation IST", scalar("SELECT COUNT(*) FROM documents")),
-        ("Publications scientifiques", scalar("SELECT COUNT(*) FROM scientific_publications WHERE type_publication NOT IN ('Note politique','Note de synthèse')")),
-        ("Documents bibliothèque", scalar("SELECT COUNT(*) FROM library_items")),
+        ("Compléments de communication", scalar("SELECT (SELECT COUNT(*) FROM communications) + (SELECT COUNT(*) FROM media) + (SELECT COUNT(*) FROM audiovisual) + (SELECT COUNT(*) FROM communication_formats)")),
+        ("📚 Catalogue documentaire total", catalogue_total),
+        ("Fonds bibliothèque", library_total),
+        ("Ressources documentaires / IST", ist_total),
         ("Consultations", scalar("SELECT COUNT(*) FROM consultations")),
-        ("🧾 Fiches techniques", scalar("SELECT COUNT(*) FROM scientific_results WHERE LOWER(type_resultat) IN ('fiche technique','fiches techniques')")),
-        ("📘 Mémoires", scalar("SELECT COUNT(*) FROM scientific_results WHERE LOWER(type_resultat) IN ('mémoire','memoire','mémoires','memoires')")),
-        ("🎓 Thèses", scalar("SELECT COUNT(*) FROM scientific_results WHERE LOWER(type_resultat) IN ('thèse','these','thèses','theses')")),
-        ("📑 Rapports scientifiques", scalar("SELECT COUNT(*) FROM scientific_results WHERE LOWER(type_resultat) LIKE '%rapport%'")),
-        ("📰 Publications scientifiques", scalar("SELECT COUNT(*) FROM scientific_publications WHERE type_publication NOT IN ('Note politique','Note de synthèse')")),
-        ("🗒️ Notes politiques", scalar("SELECT COUNT(*) FROM scientific_publications WHERE type_publication='Note politique'")),
-        ("📋 Notes de synthèse", scalar("SELECT COUNT(*) FROM scientific_publications WHERE type_publication='Note de synthèse'")),
-        ("Résultats scientifiques — total", scalar("SELECT (SELECT COUNT(*) FROM scientific_results) + (SELECT COUNT(*) FROM scientific_publications) + (SELECT COUNT(*) FROM documents)")),
-        ("Visiteurs", scalar("SELECT COUNT(*) FROM library_visits")),
         ("Prêts en cours", scalar("SELECT COUNT(*) FROM loans WHERE statut='En cours'")),
         ("Prêts en retard", scalar("SELECT COUNT(*) FROM loans WHERE statut='En retard'")),
+        ("Résultats scientifiques", scientific_total),
+        ("Visiteurs", scalar("SELECT COUNT(*) FROM library_visits")),
+        ("Profils chercheurs", scalar("SELECT COUNT(*) FROM researcher_profiles")),
+        ("Actions de valorisation", scalar("SELECT COUNT(*) FROM researcher_valorization")),
     ]
-    cols = st.columns(3)
+    st.markdown(
+        '<div class="section-banner"><span>PILOTAGE CRA / ISRA</span>'
+        '<strong>Vue d’ensemble des activités, du Catalogue documentaire et des résultats</strong></div>',
+        unsafe_allow_html=True,
+    )
+    cols = st.columns(4)
     for i, (label, value) in enumerate(metrics):
-        with cols[i % 3]:
+        with cols[i % 4]:
             st.markdown(f'<div class="metric"><div class="label">{label}</div><div class="value">{value}</div></div>', unsafe_allow_html=True)
 
     st.markdown("### 📈 Activités par mois")
     act = df("""
-        SELECT TO_CHAR(date_activite, 'YYYY-MM') AS mois,
-               COUNT(*) AS nombre
-        FROM activities
-        WHERE date_activite IS NOT NULL
-        GROUP BY TO_CHAR(date_activite, 'YYYY-MM')
-        ORDER BY mois
+        SELECT TO_CHAR(date_activite, 'YYYY-MM') AS mois, COUNT(*) AS nombre
+        FROM activities WHERE date_activite IS NOT NULL
+        GROUP BY TO_CHAR(date_activite, 'YYYY-MM') ORDER BY mois
     """)
     if not act.empty:
         st.line_chart(act.set_index("mois"))
@@ -2127,14 +2214,31 @@ def render_dashboard():
 
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("### 📚 Bibliothèque")
-        lib = df("""
-            SELECT type_document AS type, SUM(exemplaires) AS exemplaires,
-                   SUM(disponibles) AS disponibles
-            FROM library_items GROUP BY type_document ORDER BY exemplaires DESC
+        st.markdown("### 📚 Composition du Catalogue")
+        catalogue_types = df("""
+            SELECT 'Fonds bibliothèque' AS origine, type_document AS type, COUNT(*) AS nombre
+            FROM library_items GROUP BY type_document
+            UNION ALL
+            SELECT 'Ressources documentaires / IST' AS origine, type_document AS type, COUNT(*) AS nombre
+            FROM documents GROUP BY type_document
+            ORDER BY origine, nombre DESC
         """)
-        st.dataframe(lib, use_container_width=True, hide_index=True)
-        export_buttons(lib, "bibliotheque_dashboard", "Bibliothèque — synthèse CRA/ISRA")
+        if catalogue_types.empty:
+            st.info("Aucune ressource n'est encore enregistrée dans le Catalogue.")
+        else:
+            st.dataframe(catalogue_types, use_container_width=True, hide_index=True)
+            chart = catalogue_types.copy()
+            chart["libelle"] = chart["origine"] + " — " + chart["type"].fillna("Type non précisé").astype(str)
+            st.bar_chart(chart.set_index("libelle")[["nombre"]])
+        st.markdown("### 📦 Disponibilité du fonds bibliothèque")
+        stock = df("""
+            SELECT COALESCE(SUM(exemplaires),0) AS exemplaires,
+                   COALESCE(SUM(disponibles),0) AS disponibles,
+                   COALESCE(SUM(exemplaires-disponibles),0) AS empruntes_ou_indisponibles
+            FROM library_items
+        """)
+        st.dataframe(stock, use_container_width=True, hide_index=True)
+        export_buttons(catalogue_types, "composition_catalogue_dashboard", "Composition du Catalogue documentaire")
     with c2:
         st.markdown("### ⏰ Prêts à surveiller")
         late = df("""
@@ -2146,8 +2250,21 @@ def render_dashboard():
             WHERE l.statut IN ('En cours','En retard')
             ORDER BY l.date_retour_prevue
         """)
-        st.dataframe(late, use_container_width=True, hide_index=True)
+        if late.empty:
+            st.success("Aucun prêt en cours ou en retard.")
+        else:
+            st.dataframe(late, use_container_width=True, hide_index=True)
         export_buttons(late, "prets_a_surveiller", "Prêts à surveiller — CRA/ISRA")
+
+    st.markdown("### 🆕 Dernières ressources ajoutées au Catalogue")
+    library_recent = df("SELECT titre, auteurs, annee, type_document, lien, 'Fonds bibliothèque' AS origine FROM library_items ORDER BY id DESC LIMIT 8")
+    documents_recent = df("SELECT titre, auteurs, annee, type_document, lien, 'Ressource documentaire / IST' AS origine FROM documents ORDER BY id DESC LIMIT 8")
+    recent = pd.concat([library_recent, documents_recent], ignore_index=True, sort=False)
+    if not recent.empty:
+        st.dataframe(recent.sort_values("annee", ascending=False, na_position="last"), use_container_width=True, hide_index=True,
+                     column_config={"lien": st.column_config.LinkColumn("Lien / Drive", display_text="Ouvrir ↗")})
+    else:
+        st.info("Le Catalogue n'a pas encore de ressource.")
 
 
 def render_activities():
@@ -2208,6 +2325,7 @@ def render_activities():
         objectifs = st.text_area("Objectifs")
         description = st.text_area("Description")
         resultats = st.text_area("Résultats obtenus")
+        lien_ressource = drive_link_input("📎 Photos, vidéos, affiche ou dossier de preuves (Google Drive)", key="activity_drive_evidence")
         observations = st.text_area("Observations")
         submitted = st.form_submit_button("💾 Enregistrer", type="primary")
     if submitted:
@@ -2222,9 +2340,9 @@ def render_activities():
         else:
             ref = f"ACT-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
             q("""INSERT INTO activities(reference,titre,type_activite,domaine,date_activite,date_fin,heure_debut,heure_fin,
-                 lieu,region,localite,responsable,description,objectifs,resultats,observations,statut)
-                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-              (ref,titre,type_a,domaine,str(d),str(d_fin),hd,hf,lieu,region,localite,responsable,description,objectifs,resultats,observations,statut))
+                 lieu,region,localite,responsable,description,objectifs,resultats,lien_ressource,observations,statut)
+                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+              (ref,titre,type_a,domaine,str(d),str(d_fin),hd,hf,lieu,region,localite,responsable,description,objectifs,resultats,lien_ressource,observations,statut))
             st.success(f"Activité enregistrée : {ref} — du {d.strftime('%d/%m/%Y')} au {d_fin.strftime('%d/%m/%Y')} ({duree_jours} jour(s)).")
             st.rerun()
     st.divider()
@@ -2488,81 +2606,127 @@ def render_communication():
         st.info("Enregistrez d'abord une activité pour pouvoir consulter ses compléments.")
 
 def render_documentations():
-    """Espace Documentation organisé en quatre onglets métier uniques."""
+    """Espace documentaire unifié : un Catalogue, les consultations, les personnes et les prêts."""
     st.header("📚 Documentations")
-    st.caption("Quatre espaces : Biblio et Documentation, Consultation, Personnes, et Prêts et retour.")
-    tab_biblio, tab_consult, tab_people, tab_loans = st.tabs([
-        "📚 Biblio et Documentation", "📖 Consultation", "👥 Personnes", "📕 Prêts et retour"
+    st.caption("Le Catalogue rassemble dans un seul espace le fonds bibliothèque et toutes les ressources documentaires / IST déjà enregistrées.")
+    tab_catalogue, tab_consult, tab_people, tab_loans = st.tabs([
+        "📚 Catalogue", "📖 Consultations", "👥 Personnes", "📕 Prêts & retours"
     ])
 
-    with tab_biblio:
-        st.subheader("📚 Catalogue et gestion des documents")
-        with st.form("lib_form_new"):
-            c1,c2,c3=st.columns(3)
-            inventaire=c1.text_input("N° inventaire"); cote=c2.text_input("Cote"); isbn=c3.text_input("ISBN")
-            titre=c1.text_input("Titre *"); sous_titre=c2.text_input("Sous-titre"); auteurs=c3.text_input("Auteur(s)")
-            c1,c2,c3=st.columns(3)
-            editeur=c1.text_input("Éditeur"); annee=c2.number_input("Année",0,2100,value=date.today().year); typ=c3.selectbox("Type",["Livre","Article","Rapport","Mémoire","Thèse","Document technique","Publication scientifique","Brochure","Plaquette","Revue","Bulletin","Actes de conférence","Document audiovisuel","Autre"])
-            c1,c2,c3=st.columns(3)
-            domaine=c1.text_input("Domaine"); theme=c2.text_input("Thématique"); mots=c3.text_input("Mots-clés")
-            c1,c2,c3=st.columns(3)
-            exemplaires=c1.number_input("Exemplaires",1,10000,1); disponibles=c2.number_input("Disponibles",0,10000,1); localisation=c3.text_input("Localisation")
-            etat=c1.selectbox("État",["Bon","Moyen","À restaurer","Endommagé"]); format_doc=c2.selectbox("Format",["Papier","Numérique","Papier + numérique"]); lien=c3.text_input("Lien web (URL)",placeholder="https://…")
-            resume=st.text_area("Résumé")
-            observations=st.text_area("Observations")
-            ok=st.form_submit_button("💾 Ajouter au catalogue",type="primary")
-        if ok:
-            try:
-                path=None
-                q("""INSERT INTO library_items(inventaire,cote,isbn,titre,sous_titre,auteurs,editeur,annee,type_document,domaine,thematique,mots_cles,exemplaires,disponibles,localisation,etat,format_document,resume,fichier,lien,observations)
-                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(inventaire,cote,isbn,titre,sous_titre,auteurs,editeur,annee,typ,domaine,theme,mots,exemplaires,disponibles,localisation,etat,format_doc,resume,path,lien,observations))
-                st.success("Document ajouté au catalogue."); st.rerun()
-            except Exception as exc:
-                if 'duplicate key' in str(exc).lower() or 'unique constraint' in str(exc).lower(): st.error("Le numéro d'inventaire existe déjà.")
-                else: st.error(f"Erreur PostgreSQL / Storage : {exc}")
-        catalog=df("SELECT id,inventaire,cote,titre,auteurs,annee,type_document,exemplaires,disponibles,localisation,etat FROM library_items ORDER BY titre")
-        st.dataframe(catalog,use_container_width=True,hide_index=True)
-        export_buttons(catalog,"catalogue_bibliotheque","Catalogue de la bibliothèque CRA/ISRA")
+    with tab_catalogue:
+        st.markdown(
+            '<div class="section-banner"><span>CATALOGUE DOCUMENTAIRE</span>'
+            '<strong>Fonds bibliothèque • Ressources IST • Livres • Articles • Rapports • Supports numériques</strong></div>',
+            unsafe_allow_html=True,
+        )
+        library_count = int(scalar("SELECT COUNT(*) FROM library_items") or 0)
+        documents_count = int(scalar("SELECT COUNT(*) FROM documents") or 0)
+        metric_cols = st.columns(3)
+        metric_cols[0].metric("Total du catalogue", library_count + documents_count)
+        metric_cols[1].metric("Fonds bibliothèque", library_count)
+        metric_cols[2].metric("Ressources documentaires / IST", documents_count)
 
-    with tab_biblio:
-        st.markdown("---")
-        st.subheader("📚 Biblio/Documentation IST")
-        st.caption("Enregistrez et consultez les ressources IST ici, séparément des résultats scientifiques.")
-        with st.form("documentation_ist_form"):
-            c1, c2, c3 = st.columns(3)
-            titre_ist = c1.text_input("Titre *", key="docist_titre")
-            auteurs_ist = c2.text_input("Auteur(s)", key="docist_auteurs")
-            annee_ist = c3.number_input("Année", 1900, 2100, value=date.today().year, key="docist_annee")
-            c1, c2, c3 = st.columns(3)
-            type_ist = c1.selectbox("Type de document", ["Article scientifique", "Ouvrage", "Chapitre d’ouvrage", "Communication scientifique", "Actes de conférence", "Rapport", "Mémoire", "Thèse", "Document technique", "Guide", "Brochure", "Plaquette", "Revue / bulletin", "Autre"], key="docist_type")
-            theme_ist = c2.text_input("Thématique / domaine", key="docist_theme")
-            chercheur_ist = c3.text_input("Chercheur associé", key="docist_chercheur")
-            projet_ist = st.text_input("Projet associé", key="docist_projet")
-            resume_ist = st.text_area("Résumé", key="docist_resume")
-            c1, c2, c3 = st.columns(3)
-            mots_ist = c1.text_input("Mots-clés", key="docist_mots")
-            langue_ist = c2.text_input("Langue", value="Français", key="docist_langue")
-            pages_ist = c3.number_input("Nombre de pages", 0, step=1, key="docist_pages")
-            c1, c2 = st.columns(2)
-            reference_ist = c1.text_input("Référence bibliographique / DOI", key="docist_reference")
-            lien_ist = drive_link_input("Lien web / DOI / fichier Google Drive", key="docist_lien")
-            statut_ist = st.selectbox("Statut", ["Disponible", "À vérifier", "En préparation", "Archivé"], key="docist_statut")
-            observations_ist = st.text_area("Observations", key="docist_observations")
-            submit_ist = st.form_submit_button("💾 Enregistrer la documentation IST", type="primary")
-        if submit_ist:
-            if not titre_ist.strip():
-                st.error("Le titre est obligatoire.")
-            else:
-                q("""INSERT INTO documents(titre,auteurs,annee,type_document,thematique,mots_cles,chercheur_associe,projet,resume,langue,pages,reference,fichier,lien,statut,observations)
-                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                  (titre_ist, auteurs_ist, annee_ist, type_ist, theme_ist, mots_ist, chercheur_ist, projet_ist, resume_ist, langue_ist, pages_ist, reference_ist, None, lien_ist, statut_ist, observations_ist))
-                st.success("Documentation IST enregistrée.")
-                st.rerun()
-        ist_data = df("""SELECT id,titre,auteurs,annee,type_document,thematique,mots_cles,
-                                chercheur_associe,projet,resume,langue,pages,reference,lien,statut,observations
-                         FROM documents ORDER BY annee DESC, titre""")
-        st.dataframe(ist_data, use_container_width=True, hide_index=True)
-        export_buttons(ist_data, "biblio_documentation_ist", "Biblio/Documentation IST CRA/ISRA")
+        with st.expander("➕ Ajouter un ouvrage ou un document au fonds bibliothèque", expanded=False):
+            with st.form("lib_form_new"):
+                c1,c2,c3=st.columns(3)
+                inventaire=c1.text_input("N° inventaire")
+                cote=c2.text_input("Cote")
+                isbn=c3.text_input("ISBN")
+                titre=c1.text_input("Titre *")
+                sous_titre=c2.text_input("Sous-titre")
+                auteurs=c3.text_input("Auteur(s)")
+                c1,c2,c3=st.columns(3)
+                editeur=c1.text_input("Éditeur")
+                annee=c2.number_input("Année",0,2100,value=date.today().year)
+                typ=c3.selectbox("Type",["Livre","Article","Rapport","Mémoire","Thèse","Document technique","Publication scientifique","Brochure","Plaquette","Revue","Bulletin","Actes de conférence","Document audiovisuel","Autre"])
+                c1,c2,c3=st.columns(3)
+                domaine=c1.text_input("Domaine")
+                theme=c2.text_input("Thématique")
+                mots=c3.text_input("Mots-clés")
+                c1,c2,c3=st.columns(3)
+                exemplaires=c1.number_input("Exemplaires",1,10000,1)
+                disponibles=c2.number_input("Disponibles",0,10000,1)
+                localisation=c3.text_input("Localisation")
+                c1,c2=st.columns(2)
+                etat=c1.selectbox("État",["Bon","Moyen","À restaurer","Endommagé"])
+                format_doc=c2.selectbox("Format",["Papier","Numérique","Papier + numérique"])
+                lien=drive_link_input("📎 Lien du document, PDF, photo ou dossier Google Drive", key="catalogue_library_drive")
+                resume=st.text_area("Résumé")
+                observations=st.text_area("Observations")
+                ok=st.form_submit_button("💾 Ajouter au catalogue",type="primary")
+            if ok:
+                if not titre.strip():
+                    st.error("Le titre est obligatoire.")
+                elif disponibles > exemplaires:
+                    st.error("Le nombre de documents disponibles ne peut pas dépasser le nombre d'exemplaires.")
+                else:
+                    try:
+                        q("""INSERT INTO library_items(inventaire,cote,isbn,titre,sous_titre,auteurs,editeur,annee,type_document,domaine,thematique,mots_cles,exemplaires,disponibles,localisation,etat,format_document,resume,fichier,lien,observations)
+                             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                          (inventaire or None,cote,isbn,titre,sous_titre,auteurs,editeur,annee,typ,domaine,theme,mots,exemplaires,disponibles,localisation,etat,format_doc,resume,None,lien,observations))
+                        st.success("Document ajouté au fonds bibliothèque du Catalogue.")
+                        st.rerun()
+                    except Exception as exc:
+                        if 'duplicate key' in str(exc).lower() or 'unique constraint' in str(exc).lower():
+                            st.error("Le numéro d'inventaire existe déjà. Vérifiez la référence avant de réessayer.")
+                        else:
+                            st.error(f"Erreur lors de l'enregistrement : {exc}")
+
+        with st.expander("➕ Ajouter une ressource documentaire / IST au Catalogue", expanded=False):
+            with st.form("documentation_ist_form", clear_on_submit=True):
+                c1, c2, c3 = st.columns(3)
+                titre_ist = c1.text_input("Titre *", key="docist_titre")
+                auteurs_ist = c2.text_input("Auteur(s)", key="docist_auteurs")
+                annee_ist = c3.number_input("Année", 1900, 2100, value=date.today().year, key="docist_annee")
+                c1, c2, c3 = st.columns(3)
+                type_ist = c1.selectbox("Type de document", ["Article scientifique", "Ouvrage", "Chapitre d’ouvrage", "Communication scientifique", "Actes de conférence", "Rapport", "Mémoire", "Thèse", "Document technique", "Guide", "Brochure", "Plaquette", "Revue / bulletin", "Autre"], key="docist_type")
+                theme_ist = c2.text_input("Thématique / domaine", key="docist_theme")
+                chercheur_ist = c3.text_input("Chercheur associé", key="docist_chercheur")
+                projet_ist = st.text_input("Projet associé", key="docist_projet")
+                resume_ist = st.text_area("Résumé", key="docist_resume")
+                c1, c2, c3 = st.columns(3)
+                mots_ist = c1.text_input("Mots-clés", key="docist_mots")
+                langue_ist = c2.text_input("Langue", value="Français", key="docist_langue")
+                pages_ist = c3.number_input("Nombre de pages", 0, step=1, key="docist_pages")
+                c1, c2 = st.columns(2)
+                reference_ist = c1.text_input("Référence bibliographique / DOI", key="docist_reference")
+                lien_ist = drive_link_input("📎 DOI, article, mémoire, thèse, PDF ou dossier Google Drive", key="docist_lien")
+                statut_ist = st.selectbox("Statut", ["Disponible", "À vérifier", "En préparation", "Archivé"], key="docist_statut")
+                observations_ist = st.text_area("Observations", key="docist_observations")
+                submit_ist = st.form_submit_button("💾 Ajouter cette ressource au Catalogue", type="primary")
+            if submit_ist:
+                if not titre_ist.strip():
+                    st.error("Le titre est obligatoire.")
+                else:
+                    q("""INSERT INTO documents(titre,auteurs,annee,type_document,thematique,mots_cles,chercheur_associe,projet,resume,langue,pages,reference,fichier,lien,statut,observations)
+                         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                      (titre_ist,auteurs_ist,annee_ist,type_ist,theme_ist,mots_ist,chercheur_ist,projet_ist,resume_ist,langue_ist,pages_ist,reference_ist,None,lien_ist,statut_ist,observations_ist))
+                    st.success("Ressource ajoutée au Catalogue documentaire.")
+                    st.rerun()
+
+        st.markdown("### 📖 Registre unique du Catalogue")
+        library_all = df("SELECT * FROM library_items ORDER BY titre")
+        documents_all = df("SELECT * FROM documents ORDER BY annee DESC NULLS LAST, titre")
+        catalogue = build_catalogue_view(library_all, documents_all)
+        if catalogue.empty:
+            st.info("Le Catalogue est vide. Ajoutez un ouvrage ou une ressource documentaire pour commencer.")
+        else:
+            f1, f2 = st.columns([2, 1])
+            recherche_catalogue = f1.text_input("🔎 Rechercher dans le catalogue", key="catalogue_search_all", placeholder="Titre, auteur, type, année, mots-clés, DOI…")
+            origine_catalogue = f2.selectbox("Origine", ["Toutes", "Fonds bibliothèque", "Ressource documentaire / IST"], key="catalogue_origin_filter")
+            catalogue_affiche = catalogue.copy()
+            if origine_catalogue != "Toutes":
+                catalogue_affiche = catalogue_affiche[catalogue_affiche["Origine"] == origine_catalogue]
+            if recherche_catalogue.strip():
+                query_catalogue = recherche_catalogue.strip().casefold()
+                mask_catalogue = catalogue_affiche.astype(str).apply(lambda col: col.str.casefold().str.contains(query_catalogue, na=False)).any(axis=1)
+                catalogue_affiche = catalogue_affiche[mask_catalogue]
+            st.caption(f"{len(catalogue_affiche)} ressource(s) affichée(s) sur {len(catalogue)} enregistrement(s) conservé(s) dans les deux registres d'origine.")
+            st.dataframe(catalogue_affiche, use_container_width=True, hide_index=True, column_config={
+                "Lien web / Drive": st.column_config.LinkColumn("Lien web / Drive", display_text="Ouvrir le document ↗")
+            })
+        export_buttons(catalogue, "catalogue_documentaire_unifie", "Catalogue documentaire unifié CRA/ISRA")
+        st.caption("Les anciennes données restent conservées dans leurs tables PostgreSQL d'origine ; elles sont maintenant affichées ensemble dans ce Catalogue unique. Aucun enregistrement n'est supprimé.")
 
     with tab_consult:
         st.subheader("📖 Consultations des documents")
@@ -2638,38 +2802,8 @@ def render_documentations():
                 st.success("Retour enregistré."); st.rerun()
         else: st.info("Aucun prêt en cours.")
 
-    st.info("Les exports PDF utilisent un format A4 portrait, avec couverture graphique, en-têtes/pieds de page et toutes les données des registres exportés.")
+    st.info("Les exports PDF utilisent un format A4 portrait, avec couverture graphique, en-têtes/pieds de page et les données des registres sélectionnés.")
 
-
-def render_documentation_ist():
-    """Formulaire Documentation IST, conservé pour compatibilité interne."""
-    st.subheader("📄 Documentation IST")
-    st.caption("Recherche, veille, ressources documentaires et fonds IST.")
-    with st.form("doc_form_new"):
-        c1,c2,c3=st.columns(3)
-        titre=c1.text_input("Titre *"); auteurs=c2.text_input("Auteur(s)"); annee=c3.number_input("Année",1900,2100,value=date.today().year)
-        c1,c2,c3=st.columns(3)
-        typ=c1.selectbox("Type",["Article scientifique","Mémoire","Thèse","Rapport","Communication","Publication","Document technique","Guide","Brochure","Plaquette","Revue","Bulletin","Autre"])
-        theme=c2.text_input("Thématique"); mots=c3.text_input("Mots-clés")
-        chercheur=st.text_input("Chercheur associé"); projet=st.text_input("Projet")
-        resume=st.text_area("Résumé")
-        c1,c2,c3=st.columns(3)
-        langue=c1.text_input("Langue",value="Français"); pages=c2.number_input("Pages",0,step=1); reference=c3.text_input("Référence")
-        lien=drive_link_input("Lien web / fichier Google Drive", key="documents_drive_link")
-        statut=st.selectbox("Statut",["Disponible","À vérifier","Archivé"])
-        observations=st.text_area("Observations")
-        ok=st.form_submit_button("💾 Ajouter le document",type="primary")
-    if ok:
-        if not titre.strip():
-            st.error("Le titre est obligatoire.")
-        else:
-            path=None
-            q("""INSERT INTO documents(titre,auteurs,annee,type_document,thematique,mots_cles,chercheur_associe,projet,resume,langue,pages,reference,fichier,lien,statut,observations)
-                 VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(titre,auteurs,annee,typ,theme,mots,chercheur,projet,resume,langue,pages,reference,path,lien,statut,observations))
-            st.success("Document IST enregistré."); st.rerun()
-    data=df("SELECT id,titre,auteurs,annee,type_document,thematique,reference,statut FROM documents ORDER BY annee DESC,id DESC")
-    st.dataframe(data,use_container_width=True,hide_index=True)
-    export_buttons(data,"documentation_ist","Documentation IST CRA/ISRA")
 
 
 def render_visitors():
@@ -2719,7 +2853,7 @@ def render_visitors():
 
 def render_researchers():
     st.header("🔬 Valorisation des chercheurs")
-    st.caption("Profils chercheurs indépendants de la table Personnes : un chercheur peut être créé ici sans être renseigné dans Documentation.")
+    st.caption("Profils chercheurs indépendants de la table Personnes : un chercheur peut être créé ici sans être renseigné dans le Catalogue documentaire.")
     st.markdown('<div class="section-banner"><span>CHERCHEURS</span><strong>Profil • expertise • productions • valorisation</strong></div>', unsafe_allow_html=True)
     p1,p2=st.tabs(["👨‍🔬 Profils des chercheurs","🚀 Actions de valorisation"])
     with p1:
@@ -2733,16 +2867,23 @@ def render_researchers():
             email=c1.text_input("E-mail"); telephone=c2.text_input("Téléphone"); orcid=c3.text_input("ORCID")
             bio=st.text_area("Biographie courte")
             profil=st.text_area("Profil scientifique complet",height=150)
-            lien=drive_link_input("🔗 Lien du profil / CV / dossier Drive", key="chercheur_profil_drive", help_text="Lien vers ORCID, page institutionnelle, CV ou dossier Google Drive.")
+            c1,c2=st.columns(2)
+            photo_drive=drive_link_input("🖼️ Photo / portrait du chercheur (Google Drive)", key="chercheur_photo_drive")
+            cv_drive=drive_link_input("📄 CV / dossier professionnel (Google Drive)", key="chercheur_cv_drive")
+            lien=drive_link_input("🔗 Page institutionnelle / ORCID / profil complet", key="chercheur_profil_drive", help_text="Lien vers ORCID, page institutionnelle ou profil public.")
             observations=st.text_area("Observations")
             ok=st.form_submit_button("💾 Créer le profil chercheur",type="primary")
         if ok:
             if not nom.strip(): st.error("Le nom du chercheur est obligatoire.")
             else:
-                q("""INSERT INTO researcher_profiles(nom,prenom,grade_fonction,unite_laboratoire,domaine_expertise,mots_cles,biographie,profil_complet,email,telephone,ORCID,lien_profil,observations) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",(nom,prenom,fonction,unite,domaine,mots,bio,profil,email,telephone,orcid,lien,observations))
-                st.success("Profil chercheur créé indépendamment de Documentation."); st.rerun()
-        profiles=df("SELECT id,nom,prenom,grade_fonction,unite_laboratoire,domaine_expertise,email,ORCID,lien_profil FROM researcher_profiles ORDER BY nom,prenom")
-        st.dataframe(profiles,use_container_width=True,hide_index=True)
+                q("""INSERT INTO researcher_profiles(nom,prenom,grade_fonction,unite_laboratoire,domaine_expertise,mots_cles,biographie,profil_complet,email,telephone,ORCID,photo,cv_fichier,lien_profil,observations) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(nom,prenom,fonction,unite,domaine,mots,bio,profil,email,telephone,orcid,photo_drive,cv_drive,lien,observations))
+                st.success("Profil chercheur créé indépendamment du Catalogue documentaire."); st.rerun()
+        profiles=df("SELECT id,nom,prenom,grade_fonction,unite_laboratoire,domaine_expertise,email,ORCID,photo,cv_fichier,lien_profil FROM researcher_profiles ORDER BY nom,prenom")
+        st.dataframe(profiles,use_container_width=True,hide_index=True,column_config={
+            "photo": st.column_config.LinkColumn("Photo", display_text="Ouvrir ↗"),
+            "cv_fichier": st.column_config.LinkColumn("CV / dossier", display_text="Ouvrir ↗"),
+            "lien_profil": st.column_config.LinkColumn("Profil", display_text="Ouvrir ↗"),
+        })
         export_buttons(profiles,"profils_chercheurs","Profils des chercheurs CRA/ISRA")
     with p2:
         profiles=df("SELECT id,nom,prenom,grade_fonction FROM researcher_profiles ORDER BY nom,prenom")
@@ -2755,7 +2896,7 @@ def render_researchers():
             projet=st.text_input("Projet")
             c1,c2,c3=st.columns(3)
             type_val=c1.selectbox("Type de valorisation",["Article","Interview","Portrait","Vidéo","Publication","Communication scientifique","Conférence","Démonstration","Autre"])
-            support=c2.text_input("Support"); lien=c3.text_input("Lien web / fichier Drive",key="valorisation_drive")
+            support=c2.text_input("Support"); lien=drive_link_input("📎 Lien web / photo / vidéo / fichier Google Drive", key="valorisation_drive")
             observations=st.text_area("Observations")
             ok=st.form_submit_button("💾 Enregistrer la valorisation",type="primary")
         if ok:
@@ -2829,7 +2970,7 @@ def render_profile():
     with c1:
         st.markdown('<div class="metric"><div class="label">Fonction</div><div class="value" style="font-size:1.1rem;">Communication & Documentation</div></div>', unsafe_allow_html=True)
     with c2:
-        st.markdown('<div class="card"><h3>Mission dans l’application</h3><p>Suivi des activités, communication, médias, audiovisuel, valorisation des chercheurs, documentation/IST, bibliothèque, visiteurs, consultations, prêts/retours et production des rapports.</p></div>', unsafe_allow_html=True)
+        st.markdown('<div class="card"><h3>Mission dans l’application</h3><p>Suivi des activités, communication, médias, audiovisuel, valorisation des chercheurs, Catalogue documentaire unifié, visiteurs, consultations, prêts/retours et production des rapports.</p></div>', unsafe_allow_html=True)
     st.info("Les exports PDF utilisent désormais un format A4 portrait, avec couverture graphique, en-têtes/pieds de page et toutes les données des registres exportés.")
 
     # -----------------------------
@@ -2848,7 +2989,7 @@ def render_scientific_results():
         unsafe_allow_html=True,
     )
 
-    # La Documentation IST est désormais gérée dans Documentations > Biblio/Documentation IST.
+    # Les ressources IST sont désormais regroupées avec les autres références dans le Catalogue documentaire.
     tab_fiche, tab_memoire, tab_these, tab_rapport, tab_publications_ist, tab_note_politique, tab_note_synthese = st.tabs([
         "🧾 Fiches techniques", "📘 Mémoires", "🎓 Thèses", "📑 Rapports",
         "📰 Publications scientifiques", "🗒️ Notes politiques", "📋 Notes de synthèse"
@@ -2899,7 +3040,7 @@ def render_scientific_results():
 
     with tab_publications_ist:
         st.subheader("📰 Publications scientifiques")
-        st.caption("Les publications scientifiques sont gérées ici. Les ressources IST sont désormais dans Documentations > Biblio/Documentation IST.")
+        st.caption("Les publications scientifiques de recherche restent gérées ici. Les ressources de référence et de documentation générale sont regroupées dans le Catalogue documentaire.")
         with st.form("publications_ist_contenu_unique_form"):
             origine="Publication scientifique"
             c1,c2,c3=st.columns(3)
@@ -2985,7 +3126,7 @@ def render_reports():
     st.header("📊 Rapports, statistiques et exports")
     st.caption(
         "Rapport premium global aligné sur l'organisation actuelle : "
-        "Communication • Documentations (Biblio et Documentation, Consultation, Personnes, Prêts et retour) • Résultats scientifiques (publications scientifiques, fiches techniques, mémoires, thèses, rapports et notes) • Visiteurs • Valorisation chercheurs. "
+        "Communication • Documentations (Catalogue documentaire unifié, consultations, personnes, prêts et retours) • Résultats scientifiques (publications scientifiques, fiches techniques, mémoires, thèses, rapports et notes) • Visiteurs • Valorisation chercheurs. "
         "Choisissez une durée prédéfinie ou saisissez vos dates. Les données datées, l’aperçu, le PDF premium et les exports sont filtrés sur la période sélectionnée."
     )
 
@@ -3125,6 +3266,7 @@ def render_reports():
         (start.year, end.year),
     )
     library = df("SELECT * FROM library_items ORDER BY titre")
+    catalogue = build_catalogue_view(library, documents)
 
     consultations = df(
         "SELECT c.id, c.date_consultation, "
@@ -3191,7 +3333,7 @@ def render_reports():
     profiles = df(
         "SELECT id, nom, prenom, grade_fonction, unite_laboratoire, "
         "domaine_expertise, mots_cles, biographie, profil_complet, email, "
-        "telephone, ORCID, lien_profil, observations "
+        "telephone, ORCID, photo, cv_fichier, lien_profil, observations "
         "FROM researcher_profiles ORDER BY nom, prenom"
     )
 
@@ -3240,7 +3382,7 @@ def render_reports():
         ~publications["type_publication"].isin(["Note politique", "Note de synthèse"])
     ].copy() if not publications.empty and "type_publication" in publications.columns else pd.DataFrame()
     # Les publications scientifiques restent dans les résultats scientifiques ;
-    # les documents IST sont désormais présentés dans Documentations.
+    # les ressources documentaires sont désormais réunies dans le Catalogue.
     publications_ist = _normalized_resource_frame(publications_sans_notes, "Publication scientifique", {
         "Type":"type_publication", "Titre":"titre", "Auteurs":"auteurs", "Année":"annee",
         "Domaine / thématique":"domaine", "Projet":"projet", "Résumé":"resume", "Mots-clés":"mots_cles",
@@ -3277,7 +3419,7 @@ def render_reports():
     ], ignore_index=True, sort=False)
 
     # Répartition explicite des résultats scientifiques par rubrique métier.
-    # La Documentation IST est conservée séparément dans Documentations.
+    # Les ressources documentaires sont regroupées dans le Catalogue de Documentations.
     _scientific_type = scientific.get("type_resultat", pd.Series(index=scientific.index, dtype="object")).fillna("").astype(str).str.strip().str.casefold()
     fiches_techniques = scientific[_scientific_type.isin(["fiche technique", "fiches techniques"])].copy()
     memoires = scientific[_scientific_type.isin(["mémoire", "memoire", "mémoires", "memoires"])].copy()
@@ -3302,8 +3444,7 @@ def render_reports():
     vals = [
         ("Activités", len(activities)),
         ("Compléments de communication — registre unique", len(communication_unifiee)),
-        ("Biblio/Documentation IST", len(documents)),
-        ("Publications scientifiques", len(publications_ist)),
+        ("Catalogue documentaire", len(catalogue)),
         ("Consultations", len(consultations)),
         ("Prêts", len(loans)),
         ("🧾 Fiches techniques", len(fiches_techniques)),
@@ -3335,9 +3476,8 @@ def render_reports():
         "Audiovisuel": av,
         "Formats": formats,
         "Compléments de communication": communication_unifiee,
-        "Biblio/Documentation IST": documents,
+        "Catalogue": catalogue,
         "Publications scientifiques — ressources": publications_ist,
-        "Bibliothèque": library,
         "Consultations": consultations,
         "Prêts": loans,
         "Personnes": people,
@@ -3440,8 +3580,8 @@ def render_reports():
         st.dataframe(report_data["Compléments de communication"], use_container_width=True, hide_index=True)
 
     with st.expander("📚 03 — Documentations"):
-        st.markdown("**📚 Biblio**")
-        st.dataframe(library, use_container_width=True, hide_index=True)
+        st.markdown("**📚 Catalogue documentaire unifié — fonds bibliothèque et ressources documentaires / IST**")
+        st.dataframe(report_data["Catalogue"], use_container_width=True, hide_index=True)
         st.markdown("**📖 Consultations**")
         st.dataframe(consultations, use_container_width=True, hide_index=True)
         st.markdown("**👥 Personnes**")
@@ -3513,4 +3653,4 @@ elif page == "👤 Profil":
 elif page == "📊 Rapports & exports":
     render_reports()
 
-st.caption("ISRA • CRA — IST et Communication | Organisation : Communication • Documentations (Biblio, Biblio/Documentation IST, Consultations, Personnes, Prêts) • Résultats scientifiques (documents, publications et notes) | Formats : PDF • Excel • CSV")
+st.caption("ISRA • CRA — IST et Communication | Organisation : Communication • Documentations (Catalogue documentaire unifié, Consultations, Personnes, Prêts et retours) • Résultats scientifiques (publications et notes) | Formats : PDF • Excel • CSV")
