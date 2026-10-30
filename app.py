@@ -149,6 +149,40 @@ def storage_download_url(storage_ref, expires_in=3600):
     except Exception:
         return None
 
+
+# ============================================================
+# GOOGLE DRIVE — sélection manuelle du lien dans chaque rubrique
+# ============================================================
+# L'adresse e-mail sert à ouvrir Drive sur le bon compte dans le navigateur.
+# Elle ne remplace pas les identifiants OAuth / API Google nécessaires à un
+# véritable sélecteur automatique de fichiers.
+GOOGLE_DRIVE_ACCOUNT = "istetcom2026@gmail.com"
+GOOGLE_DRIVE_HOME = (
+    "https://drive.google.com/drive/u/0/my-drive"
+    "?authuser=" + GOOGLE_DRIVE_ACCOUNT
+)
+
+def drive_link_input(label="Lien Google Drive / URL", key=None, help_text=None):
+    """Ouvre Google Drive dans un nouvel onglet puis récupère le lien partagé collé."""
+    st.markdown(
+        f'<div style="margin:6px 0 3px;padding:9px 12px;'
+        f'background:#eef7f1;border:1px solid #cfe5d5;border-radius:10px;">'
+        f'<b>📂 Joindre depuis Google Drive</b><br>'
+        f'<a href="{GOOGLE_DRIVE_HOME}" target="_blank" rel="noopener noreferrer">'
+        f' Ouvrir le Drive de {GOOGLE_DRIVE_ACCOUNT} ↗</a>'
+        f'<span style="color:#52616b;font-size:0.82rem;"> — Dans Drive : '
+        f'clic droit sur le fichier → Partager → Copier le lien.</span></div>',
+        unsafe_allow_html=True,
+    )
+    value = st.text_input(
+        label,
+        key=key,
+        placeholder="Collez ici le lien Google Drive copié (ou une URL / DOI)",
+        help=help_text or "Le lien est enregistré dans la rubrique correspondante. Vérifiez les droits de partage du fichier.",
+    )
+    return value.strip()
+
+
 # -----------------------------
 # AUTHENTIFICATION
 # -----------------------------
@@ -2216,7 +2250,7 @@ def _communication_actions():
         titre=c1.text_input("Titre *"); type_action=c2.selectbox("Type d'action",["Affiche","Invitation","Communiqué","Dossier de presse","Article","Reportage","Interview","Photographie","Vidéo","Film","Brochure","Plaquette","Kakemono","Publication web","Autre"])
         plateforme=c3.selectbox("Plateforme",["Site web","Facebook","LinkedIn","YouTube","WhatsApp","Radio","Télévision","Presse écrite","Autre"])
         c1,c2,c3=st.columns(3)
-        dp=c1.date_input("Date de publication",date.today()); lien=c2.text_input("Lien"); vues=c3.number_input("Vues",0,step=1)
+        dp=c1.date_input("Date de publication",date.today()); lien=drive_link_input("Lien / fichier Drive", key="comm_lien_drive"); vues=c3.number_input("Vues",0,step=1)
         c1,c2,c3=st.columns(3)
         reactions=c1.number_input("Réactions",0,step=1); commentaires=c2.number_input("Commentaires",0,step=1); partages=c3.number_input("Partages",0,step=1)
         telechargements=st.number_input("Téléchargements",0,step=1)
@@ -2239,7 +2273,7 @@ def _communication_media():
         media_name=c1.text_input("Nom du média *"); media_type=c2.selectbox("Type",["Télévision","Radio","Presse écrite","Presse en ligne","Magazine","Site web","Autre"]); journaliste=c3.text_input("Journaliste")
         c1,c2,c3=st.columns(3)
         interviewee=c1.text_input("Personne interviewée"); sujet=c2.text_input("Sujet"); di=c3.date_input("Date",date.today())
-        lieu=st.text_input("Lieu"); type_intervention=st.selectbox("Type d'intervention",["Interview","Reportage","Article","Émission","Conférence de presse","Autre"]); lien=st.text_input("Lien web (URL)",placeholder="https://…")
+        lieu=st.text_input("Lieu"); type_intervention=st.selectbox("Type d'intervention",["Interview","Reportage","Article","Émission","Conférence de presse","Autre"]); lien=drive_link_input("Lien web / fichier Google Drive", key="media_drive_link")
         observations=st.text_area("Observations")
         ok=st.form_submit_button("💾 Enregistrer",type="primary")
     if ok:
@@ -2261,7 +2295,7 @@ def _communication_audiovisual():
         lieu=c1.text_input("Lieu"); theme=c2.text_input("Thème"); duree=c3.text_input("Durée")
         interviewes=st.text_area("Personnes interviewées")
         responsable=st.text_input("Responsable"); statut=c1.selectbox("Statut",["Prévu","En préparation","En production","Terminé","Diffusé"])
-        lien=c2.text_input("🔗 Lien de diffusion / vidéo / plateforme",placeholder="https://…")
+        lien=drive_link_input("🔗 Lien de diffusion / vidéo / fichier Drive", key="av_lien_drive")
         observations=st.text_area("Observations")
         ok=st.form_submit_button("💾 Enregistrer",type="primary")
     if ok:
@@ -2285,7 +2319,7 @@ def _communication_formats():
         description=st.text_area("Description")
         usage=st.text_area("Usage recommandé")
         norme=st.text_input("Norme / dimensions / spécification")
-        lien_ref=st.text_input("Lien de référence")
+        lien_ref=drive_link_input("Lien de référence / fichier Drive", key="format_lien_drive")
         observations=st.text_area("Observations")
         ok=st.form_submit_button("💾 Enregistrer le format",type="primary")
     if ok:
@@ -2334,7 +2368,7 @@ def render_communication():
         duree=c1.text_input("Durée / spécification (facultatif)")
         nom_format=c2.text_input("Nom du format (si applicable)")
         norme=c3.text_input("Norme / dimensions (si applicable)")
-        lien=st.text_input("🔗 Lien web / lien de diffusion / référence",placeholder="https://…")
+        lien=drive_link_input("🔗 Lien web / diffusion / fichier Google Drive", key="contenu_comm_drive")
         c1,c2,c3=st.columns(3)
         vues=c1.number_input("Vues",0,step=1)
         reactions=c2.number_input("Réactions",0,step=1)
@@ -2511,7 +2545,7 @@ def render_documentations():
             pages_ist = c3.number_input("Nombre de pages", 0, step=1, key="docist_pages")
             c1, c2 = st.columns(2)
             reference_ist = c1.text_input("Référence bibliographique / DOI", key="docist_reference")
-            lien_ist = c2.text_input("Lien web / DOI / lien institutionnel", placeholder="https://…", key="docist_lien")
+            lien_ist = drive_link_input("Lien web / DOI / fichier Google Drive", key="docist_lien")
             statut_ist = st.selectbox("Statut", ["Disponible", "À vérifier", "En préparation", "Archivé"], key="docist_statut")
             observations_ist = st.text_area("Observations", key="docist_observations")
             submit_ist = st.form_submit_button("💾 Enregistrer la documentation IST", type="primary")
@@ -2621,7 +2655,7 @@ def render_documentation_ist():
         resume=st.text_area("Résumé")
         c1,c2,c3=st.columns(3)
         langue=c1.text_input("Langue",value="Français"); pages=c2.number_input("Pages",0,step=1); reference=c3.text_input("Référence")
-        lien=st.text_input("Lien web (URL)",placeholder="https://…")
+        lien=drive_link_input("Lien web / fichier Google Drive", key="documents_drive_link")
         statut=st.selectbox("Statut",["Disponible","À vérifier","Archivé"])
         observations=st.text_area("Observations")
         ok=st.form_submit_button("💾 Ajouter le document",type="primary")
@@ -2655,7 +2689,7 @@ def render_visitors():
         c1,c2,c3=st.columns(3)
         contact=c1.text_input("Téléphone / contact")
         email=c2.text_input("E-mail")
-        lien=c3.text_input("🔗 Lien utile / profil / institution")
+        lien=drive_link_input("🔗 Lien utile / profil / document Drive", key="visiteur_lien_drive")
         c1,c2=st.columns(2)
         docs=c1.text_area("Ressources / documents consultés (références ou liens, pas de fichier)")
         emprunts=c2.text_area("Documents empruntés / références")
@@ -2699,7 +2733,7 @@ def render_researchers():
             email=c1.text_input("E-mail"); telephone=c2.text_input("Téléphone"); orcid=c3.text_input("ORCID")
             bio=st.text_area("Biographie courte")
             profil=st.text_area("Profil scientifique complet",height=150)
-            lien=st.text_input("🔗 Lien du profil / page chercheur",help="Privilégier un lien stable vers ORCID, Google Scholar, page institutionnelle, laboratoire ou publication.")
+            lien=drive_link_input("🔗 Lien du profil / CV / dossier Drive", key="chercheur_profil_drive", help_text="Lien vers ORCID, page institutionnelle, CV ou dossier Google Drive.")
             observations=st.text_area("Observations")
             ok=st.form_submit_button("💾 Créer le profil chercheur",type="primary")
         if ok:
@@ -2721,7 +2755,7 @@ def render_researchers():
             projet=st.text_input("Projet")
             c1,c2,c3=st.columns(3)
             type_val=c1.selectbox("Type de valorisation",["Article","Interview","Portrait","Vidéo","Publication","Communication scientifique","Conférence","Démonstration","Autre"])
-            support=c2.text_input("Support"); lien=c3.text_input("Lien web (URL)",placeholder="https://…")
+            support=c2.text_input("Support"); lien=c3.text_input("Lien web / fichier Drive",key="valorisation_drive")
             observations=st.text_area("Observations")
             ok=st.form_submit_button("💾 Enregistrer la valorisation",type="primary")
         if ok:
@@ -2834,7 +2868,7 @@ def render_scientific_results():
             c1,c2,c3=st.columns(3)
             mots=c1.text_input("Mots-clés",key=f"sci_mots_{label}")
             reference=c2.text_input("Référence / DOI",key=f"sci_ref_{label}")
-            lien=c3.text_input("Lien web",key=f"sci_lien_{label}",placeholder="https://…")
+            lien=drive_link_input("Lien web / document Drive",key=f"sci_lien_{label}")
             statut=st.selectbox("Statut",["Disponible","En préparation","Archivé"],key=f"sci_statut_{label}")
             observations=st.text_area("Observations",key=f"sci_obs_{label}")
             ok=st.form_submit_button("💾 Enregistrer",type="primary")
@@ -2885,7 +2919,7 @@ def render_scientific_results():
             reference=c1.text_input("Référence bibliographique / DOI",key="pubist_reference")
             pages=c2.number_input("Pages (si applicable)",0,step=1,key="pubist_pages")
             statut=c3.selectbox("Statut",["Disponible","À vérifier","En préparation","Archivé"],key="pubist_statut")
-            lien=st.text_input("🔗 Lien web / DOI / lien institutionnel",placeholder="https://…",key="pubist_lien")
+            lien=drive_link_input("🔗 Lien web / DOI / document Drive",key="pubist_lien")
             observations=st.text_area("Observations",key="pubist_observations")
             ok=st.form_submit_button("💾 Enregistrer dans le registre scientifique & IST",type="primary")
         if ok:
@@ -2924,7 +2958,7 @@ def render_scientific_results():
             c1,c2,c3=st.columns(3)
             mots=c1.text_input("Mots-clés",key=f"{ptype}_mots")
             reference=c2.text_input("Référence / DOI",key=f"{ptype}_reference")
-            lien=c3.text_input("Lien web",key=f"{ptype}_lien",placeholder="https://…")
+            lien=drive_link_input("Lien web / document Drive",key=f"{ptype}_lien")
             statut=st.selectbox("Statut",["Disponible","En préparation","Archivé"],key=f"{ptype}_statut")
             observations=st.text_area("Observations",key=f"{ptype}_observations")
             ok=st.form_submit_button(f"💾 Enregistrer — {ptype}",type="primary")
