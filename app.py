@@ -667,6 +667,12 @@ def q(sql, params=(), fetch=False):
             row = cur.fetchone()
             last = row[0] if row else None
         conn.commit()
+        cached_dataframe = globals().get("df")
+        if cached_dataframe is not None and hasattr(cached_dataframe, "clear"):
+            cached_dataframe.clear()
+        cached_scalar = globals().get("scalar")
+        if cached_scalar is not None and hasattr(cached_scalar, "clear"):
+            cached_scalar.clear()
         return last
     except Exception:
         conn.rollback()
@@ -675,9 +681,11 @@ def q(sql, params=(), fetch=False):
         cur.close()
         put_conn(conn)
 
+@st.cache_data(ttl=45, show_spinner=False)
 def df(sql, params=()):
     return pd.DataFrame(q(sql, params, True))
 
+@st.cache_data(ttl=45, show_spinner=False)
 def scalar(sql, params=()):
     rows = q(sql, params, True)
     return list(rows[0].values())[0] if rows else 0
@@ -2041,28 +2049,24 @@ def export_buttons(data, base_name, title):
     c1, c2, c3 = st.columns(3)
     with c1:
         st.download_button(
-            "⬇️ CSV", csv_bytes(data), f"{base_name}.csv",
-            "text/csv", key=f"csv_{base_name}"
+            "⬇️ CSV", lambda: csv_bytes(data), f"{base_name}.csv",
+            "text/csv", key=f"csv_{base_name}", on_click="ignore"
         )
     with c2:
         st.download_button(
-            "⬇️ Excel", excel_bytes({"Donnees": data}), f"{base_name}.xlsx",
+            "⬇️ Excel", lambda: excel_bytes({"Donnees": data}), f"{base_name}.xlsx",
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key=f"xlsx_{base_name}"
+            key=f"xlsx_{base_name}", on_click="ignore"
         )
     with c3:
         if not REPORTLAB_AVAILABLE:
             st.caption("PDF indisponible : installez reportlab.")
         else:
             try:
-                pdf = pdf_bytes(data, title)
-                if pdf:
-                    st.download_button(
-                        "⬇️ PDF", pdf, f"{base_name}.pdf",
-                        "application/pdf", key=f"pdf_{base_name}"
-                    )
-                else:
-                    st.caption("Le PDF n'a pas pu être généré. Les exports CSV et Excel restent disponibles.")
+                st.download_button(
+                    "⬇️ PDF", lambda: pdf_bytes(data, title), f"{base_name}.pdf",
+                    "application/pdf", key=f"pdf_{base_name}", on_click="ignore"
+                )
             except Exception as exc:
                 # Un défaut de mise en page PDF ne doit jamais interrompre l'application.
                 st.warning(
@@ -2764,7 +2768,8 @@ def render_documentations():
                 catalogue_affiche = catalogue_affiche[catalogue_affiche["Origine"] == origine_catalogue]
             if recherche_catalogue.strip():
                 query_catalogue = recherche_catalogue.strip().casefold()
-                mask_catalogue = catalogue_affiche.astype(str).apply(lambda col: col.str.casefold().str.contains(query_catalogue, na=False)).any(axis=1)
+                searchable_catalogue = catalogue_affiche.fillna("").astype(str).agg(" ".join, axis=1).str.casefold()
+                mask_catalogue = searchable_catalogue.str.contains(query_catalogue, regex=False, na=False)
                 catalogue_affiche = catalogue_affiche[mask_catalogue]
             st.caption(f"{len(catalogue_affiche)} ressource(s) affichée(s) sur {len(catalogue)} enregistrement(s) conservé(s) dans les deux registres d'origine.")
             st.dataframe(catalogue_affiche, use_container_width=True, hide_index=True, column_config={
@@ -3551,23 +3556,17 @@ def render_reports():
         "Valorisation chercheurs": research_data,
     }
 
-    full_pdf = complete_report_pdf(
-        report_data,
-        start,
-        end,
-        report_profile={
-            "nom": CURRENT_USER["full_name"],
-            "fonction": CURRENT_USER.get("job_title") or "",
-        },
-    )
-
     st.markdown("### ✨ Rapport premium")
-    if full_pdf is not None:
+    if REPORTLAB_AVAILABLE:
         st.download_button(
             "✨ Télécharger le RAPPORT PREMIUM COMPLET — A4",
-            full_pdf,
+            lambda: complete_report_pdf(
+                report_data, start, end,
+                report_profile={"nom": CURRENT_USER["full_name"], "fonction": CURRENT_USER.get("job_title") or ""},
+            ),
             "rapport_premium_ist_communication_CRA_ISRA.pdf",
             "application/pdf",
+            on_click="ignore",
             type="primary",
             use_container_width=True,
         )
@@ -3589,9 +3588,10 @@ def render_reports():
     excel_report_data = {name: frame for name, frame in report_data.items() if name not in _legacy_separate_sheets}
     st.download_button(
         "⬇️ Télécharger le rapport Excel complet",
-        excel_bytes(excel_report_data),
+        lambda: excel_bytes(excel_report_data),
         "rapport_premium_ist_communication_CRA_ISRA.xlsx",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        on_click="ignore",
         type="primary",
         use_container_width=True,
     )
