@@ -9,6 +9,7 @@ from datetime import date, datetime, timedelta
 import pandas as pd
 import io
 import hashlib
+import html
 
 try:
     from supabase import create_client, Client
@@ -189,6 +190,7 @@ def drive_link_input(label="Lien Google Drive / URL", key=None, help_text=None):
 # Identifiants demandés pour l'accès à l'application.
 APP_USERNAME = "Ndeye Fota Gueye"
 APP_PASSWORD = "nfg2026"
+APP_PAGES = ["🏠 Tableau de bord", "📣 Communication", "📚 Documentations", "🔬 Résultats scientifiques", "👥 Visiteurs", "🧬 Valorisation chercheurs", "👤 Profil", "📊 Rapports & exports"]
 
 
 st.set_page_config(
@@ -309,17 +311,15 @@ def show_login():
         password = st.text_input("Mot de passe", type="password", placeholder="••••••••")
         submitted = st.form_submit_button("🔐 Se connecter", type="primary", use_container_width=True)
     if submitted:
-        if username.strip() == APP_USERNAME and password == APP_PASSWORD:
+        account = q("SELECT id, username, password_hash, active FROM app_users WHERE LOWER(username)=LOWER(?)", (username.strip(),), fetch=True)
+        if account and account[0]["active"] and verify_password(password, account[0]["password_hash"]):
             st.session_state["authenticated"] = True
-            st.session_state["logged_user"] = APP_USERNAME
+            st.session_state["user_id"] = account[0]["id"]
+            st.session_state["logged_user"] = account[0]["username"]
             st.rerun()
         else:
-            st.error("Nom d'utilisateur ou mot de passe incorrect.")
+            st.error("Nom d'utilisateur ou mot de passe incorrect, ou compte désactivé.")
     st.caption("Accès interne — CRA/ISRA")
-
-if not st.session_state.get("authenticated", False):
-    show_login()
-    st.stop()
 
 
 # -----------------------------
@@ -335,6 +335,14 @@ def init_db():
     try:
         cur = conn.cursor()
         cur.execute("""
+        CREATE TABLE IF NOT EXISTS app_users (
+            id BIGSERIAL PRIMARY KEY, username TEXT NOT NULL UNIQUE, full_name TEXT NOT NULL,
+            password_hash TEXT NOT NULL, job_title TEXT DEFAULT '', department TEXT DEFAULT '',
+            profile_text TEXT DEFAULT '', allowed_pages JSONB NOT NULL DEFAULT '[]'::jsonb,
+            is_admin BOOLEAN NOT NULL DEFAULT FALSE, can_add BOOLEAN NOT NULL DEFAULT TRUE,
+            can_edit BOOLEAN NOT NULL DEFAULT FALSE, can_delete BOOLEAN NOT NULL DEFAULT FALSE,
+            active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+        );
         CREATE TABLE IF NOT EXISTS people (
             id BIGSERIAL PRIMARY KEY,
             nom TEXT NOT NULL,
@@ -629,6 +637,14 @@ init_db()
 # HELPERS
 # -----------------------------
 def q(sql, params=(), fetch=False):
+    active_user = globals().get("CURRENT_USER")
+    if active_user and not active_user.get("is_admin"):
+        operation = sql.lstrip().split(None, 1)[0].upper() if sql.strip() else ""
+        automatic_loan_status = sql.strip().startswith("UPDATE loans SET statut='En retard'")
+        denied = (operation == "INSERT" and not active_user.get("can_add")) or (operation == "UPDATE" and not active_user.get("can_edit") and not automatic_loan_status) or (operation == "DELETE" and not active_user.get("can_delete"))
+        if denied:
+            st.error("Cette action n'est pas autorisée pour votre compte.")
+            return None
     conn = get_conn()
     cur = conn.cursor()
     try:
@@ -665,6 +681,36 @@ def df(sql, params=()):
 def scalar(sql, params=()):
     rows = q(sql, params, True)
     return list(rows[0].values())[0] if rows else 0
+
+def hash_password(password):
+    salt = os.urandom(16).hex()
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("ascii"), 260000).hex()
+    return f"pbkdf2_sha256${salt}${digest}"
+
+def verify_password(password, stored):
+    try:
+        algorithm, salt, expected = stored.split("$", 2)
+        actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("ascii"), 260000).hex()
+        return algorithm == "pbkdf2_sha256" and __import__("hmac").compare_digest(actual, expected)
+    except (AttributeError, ValueError):
+        return False
+
+if scalar("SELECT COUNT(*) FROM app_users") == 0:
+    q("INSERT INTO app_users(username,full_name,password_hash,job_title,department,profile_text,allowed_pages,is_admin,can_add,can_edit,can_delete) VALUES(?,?,?,?,?,?,?::jsonb,TRUE,TRUE,TRUE,TRUE)",
+      (APP_USERNAME, APP_USERNAME, hash_password(APP_PASSWORD), "Chargée de la communication et documentation", "CRA/ISRA Saint-Louis", "Administratrice principale de la plateforme.", json.dumps(APP_PAGES, ensure_ascii=False)))
+
+if not st.session_state.get("authenticated", False):
+    show_login()
+    st.stop()
+_current = q("SELECT id, username, full_name, job_title, department, profile_text, is_admin, allowed_pages, can_add, can_edit, can_delete, active FROM app_users WHERE id=?", (st.session_state.get("user_id"),), fetch=True)
+if not _current or not _current[0]["active"]:
+    st.session_state.clear()
+    st.warning("Compte désactivé ou introuvable. Veuillez vous reconnecter.")
+    st.stop()
+CURRENT_USER = _current[0]
+if isinstance(CURRENT_USER.get("allowed_pages"), str):
+    try: CURRENT_USER["allowed_pages"] = json.loads(CURRENT_USER["allowed_pages"])
+    except ValueError: CURRENT_USER["allowed_pages"] = []
 
 def options_people():
     rows = q("SELECT id, nom, prenom, structure FROM people ORDER BY nom, prenom", fetch=True)
@@ -2152,16 +2198,15 @@ with c_logout2:
 
 # Navigation principale volontairement réduite : les fonctions existantes sont
 # regroupées dans des espaces métiers et restent accessibles sans suppression.
-pages = [
-    "🏠 Tableau de bord",
-    "📣 Communication",
-    "📚 Documentations",
-    "🔬 Résultats scientifiques",
-    "👥 Visiteurs",
-    "🧬 Valorisation chercheurs",
-    "👤 Profil",
-    "📊 Rapports & exports",
-]
+pages = list(APP_PAGES)
+if CURRENT_USER["is_admin"]:
+    pages.append("⚙️ Administration")
+else:
+    pages = [item for item in pages if item in (CURRENT_USER.get("allowed_pages") or [])]
+if not pages:
+    st.error("Aucun espace ne vous est attribué. Contactez l'administrateur.")
+    st.stop()
+st.caption(f"Connecté(e) : {CURRENT_USER['full_name']}" + (f" — {CURRENT_USER.get('job_title')}" if CURRENT_USER.get('job_title') else ""))
 page = st.radio("Navigation principale", pages, horizontal=True, label_visibility="collapsed")
 
 # -----------------------------
@@ -2957,21 +3002,22 @@ def render_researchers():
             st.info("Créez d'abord un profil chercheur pour consulter ses actions de valorisation.")
 
 def render_profile():
-    st.markdown("""
+    profile_text = html.escape(CURRENT_USER.get("profile_text") or "Aucune présentation personnelle n'a encore été renseignée.")
+    st.markdown(f"""
     <div class="hero" style="min-height:210px;background:
          radial-gradient(circle at 85% 20%,rgba(45,138,74,.55),transparent 25%),
          linear-gradient(120deg,#061F3A,#0B74B8 65%,#2D8A4A);">
       <div class="hero-badge">PROFIL • CRA / ISRA • SAINT-LOUIS</div>
-      <h1 style="font-size:2.35rem;">Ndeye Fota Gueye</h1>
-      <p style="font-size:1.05rem;">Chargée de la communication et documentation de CRA/ISRA Saint-Louis</p>
+      <h1 style="font-size:2.35rem;">{html.escape(CURRENT_USER['full_name'])}</h1>
+      <p style="font-size:1.05rem;">{html.escape(CURRENT_USER.get('job_title') or 'Profil utilisateur')}{(' • ' + html.escape(CURRENT_USER.get('department'))) if CURRENT_USER.get('department') else ''}</p>
     </div>
     """, unsafe_allow_html=True)
     c1, c2 = st.columns([1,2])
     with c1:
-        st.markdown('<div class="metric"><div class="label">Fonction</div><div class="value" style="font-size:1.1rem;">Communication & Documentation</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="metric"><div class="label">Fonction</div><div class="value" style="font-size:1.1rem;">{html.escape(CURRENT_USER.get("job_title") or "Non renseignée")}</div></div>', unsafe_allow_html=True)
     with c2:
-        st.markdown('<div class="card"><h3>Mission dans l’application</h3><p>Suivi des activités, communication, médias, audiovisuel, valorisation des chercheurs, Catalogue documentaire unifié, visiteurs, consultations, prêts/retours et production des rapports.</p></div>', unsafe_allow_html=True)
-    st.info("Les exports PDF utilisent désormais un format A4 portrait, avec couverture graphique, en-têtes/pieds de page et toutes les données des registres exportés.")
+        st.markdown(f'<div class="card"><h3>Mon profil</h3><p>{profile_text}</p></div>', unsafe_allow_html=True)
+    st.caption("Espaces autorisés : " + ("Tous les espaces" if CURRENT_USER["is_admin"] else ", ".join(CURRENT_USER.get("allowed_pages") or [])))
 
     # -----------------------------
 
@@ -3510,8 +3556,8 @@ def render_reports():
         start,
         end,
         report_profile={
-            "nom": "Ndeye Fota Gueye",
-            "fonction": "Chargée de la communication et documentation de CRA/ISRA Saint-Louis",
+            "nom": CURRENT_USER["full_name"],
+            "fonction": CURRENT_USER.get("job_title") or "",
         },
     )
 
@@ -3629,9 +3675,87 @@ def render_reports():
 
 
 # -----------------------------
+# ADMINISTRATION DES COMPTES
+# -----------------------------
+def render_administration():
+    st.header("⚙️ Administration des utilisateurs")
+    st.caption("Créez les comptes, définissez le profil personnel, les espaces accessibles et les actions autorisées.")
+    users = df("SELECT id, username AS identifiant, full_name AS nom, job_title AS fonction, department AS service, is_admin AS administrateur, active AS actif, can_add AS ajouter, can_edit AS modifier, can_delete AS supprimer FROM app_users ORDER BY full_name")
+    st.dataframe(users, use_container_width=True, hide_index=True)
+    create_tab, edit_tab = st.tabs(["➕ Créer un compte", "✏️ Modifier un compte"])
+    with create_tab:
+        with st.form("admin_create_user", clear_on_submit=True):
+            c1, c2 = st.columns(2)
+            username = c1.text_input("Identifiant *")
+            full_name = c2.text_input("Nom complet *")
+            password = c1.text_input("Mot de passe initial *", type="password")
+            job_title = c2.text_input("Fonction")
+            department = c1.text_input("Service / structure")
+            profile = st.text_area("Présentation / profil personnel")
+            access = st.multiselect("Espaces autorisés", APP_PAGES, default=["👤 Profil"])
+            a, b, c, d = st.columns(4)
+            can_add = a.checkbox("Ajouter", value=True)
+            can_edit = b.checkbox("Modifier")
+            can_delete = c.checkbox("Supprimer")
+            is_admin = d.checkbox("Administrateur")
+            submit = st.form_submit_button("Créer le compte", type="primary")
+        if submit:
+            if not username.strip() or not full_name.strip() or not password:
+                st.error("L'identifiant, le nom complet et le mot de passe sont obligatoires.")
+            elif scalar("SELECT COUNT(*) FROM app_users WHERE LOWER(username)=LOWER(?)", (username.strip(),)):
+                st.error("Cet identifiant existe déjà.")
+            else:
+                q("INSERT INTO app_users(username,full_name,password_hash,job_title,department,profile_text,allowed_pages,is_admin,can_add,can_edit,can_delete,active) VALUES(?,?,?,?,?,?,?::jsonb,?,?,?,?,?)", (username.strip(), full_name.strip(), hash_password(password), job_title.strip(), department.strip(), profile.strip(), json.dumps(access, ensure_ascii=False), is_admin, can_add, can_edit, can_delete, True))
+                st.success("Compte créé.")
+                st.rerun()
+    with edit_tab:
+        if users.empty:
+            st.info("Aucun compte.")
+        else:
+            selected = st.selectbox("Compte à modifier", users.id.tolist(), format_func=lambda x: f"{users.loc[users.id == x, 'nom'].iloc[0]} ({users.loc[users.id == x, 'identifiant'].iloc[0]})")
+            user = q("SELECT * FROM app_users WHERE id=?", (selected,), fetch=True)[0]
+            if isinstance(user["allowed_pages"], str):
+                user["allowed_pages"] = json.loads(user["allowed_pages"])
+            with st.form(f"admin_edit_{selected}"):
+                c1, c2 = st.columns(2)
+                full_name = c1.text_input("Nom complet", value=user["full_name"])
+                username = c2.text_input("Identifiant", value=user["username"])
+                job_title = c1.text_input("Fonction", value=user["job_title"] or "")
+                department = c2.text_input("Service / structure", value=user["department"] or "")
+                profile = st.text_area("Présentation / profil personnel", value=user["profile_text"] or "")
+                password = st.text_input("Nouveau mot de passe (vide = inchangé)", type="password")
+                access = st.multiselect("Espaces autorisés", APP_PAGES, default=user["allowed_pages"] or [])
+                a, b, c, d = st.columns(4)
+                can_add = a.checkbox("Ajouter", value=user["can_add"])
+                can_edit = b.checkbox("Modifier", value=user["can_edit"])
+                can_delete = c.checkbox("Supprimer", value=user["can_delete"])
+                is_admin = d.checkbox("Administrateur", value=user["is_admin"])
+                active = st.checkbox("Compte actif", value=user["active"])
+                save = st.form_submit_button("Enregistrer", type="primary")
+            if save:
+                if not full_name.strip() or not username.strip():
+                    st.error("Le nom et l'identifiant sont obligatoires.")
+                elif scalar("SELECT COUNT(*) FROM app_users WHERE LOWER(username)=LOWER(?) AND id<>?", (username.strip(), selected)):
+                    st.error("Cet identifiant est déjà utilisé.")
+                else:
+                    values = (username.strip(), full_name.strip(), job_title.strip(), department.strip(), profile.strip(), json.dumps(access, ensure_ascii=False), is_admin, can_add, can_edit, can_delete, active)
+                    if password:
+                        q("UPDATE app_users SET username=?,full_name=?,job_title=?,department=?,profile_text=?,allowed_pages=?::jsonb,is_admin=?,can_add=?,can_edit=?,can_delete=?,active=?,password_hash=? WHERE id=?", values + (hash_password(password), selected))
+                    else:
+                        q("UPDATE app_users SET username=?,full_name=?,job_title=?,department=?,profile_text=?,allowed_pages=?::jsonb,is_admin=?,can_add=?,can_edit=?,can_delete=?,active=? WHERE id=?", values + (selected,))
+                    st.success("Compte mis à jour.")
+                    st.rerun()
+
+
+# -----------------------------
 # ROUTAGE PRINCIPAL
 # -----------------------------
-if page == "🏠 Tableau de bord":
+if page == "⚙️ Administration":
+    if CURRENT_USER["is_admin"]:
+        render_administration()
+    else:
+        st.error("Accès réservé aux administrateurs.")
+elif page == "🏠 Tableau de bord":
     render_dashboard()
 elif page == "📣 Communication":
     render_communication()
