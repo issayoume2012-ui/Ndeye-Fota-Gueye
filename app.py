@@ -3849,4 +3849,3 @@ elif page == "📊 Rapports & exports":
     render_reports()
 
 st.caption("ISRA • CRA — IST et Communication | Organisation : Communication • Documentations (Catalogue documentaire unifié, Consultations, Personnes, Prêts et retours) • Résultats scientifiques (publications et notes) | Formats : PDF • Excel • CSV")
-
