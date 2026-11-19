@@ -2508,91 +2508,8 @@ def _communication_formats():
 
 
 def render_communication():
-    """Une fiche d'activité regroupe ses informations et toutes ses actions liées."""
     """Une fiche activité sans coupure, avec autant d’actions simples que demandé."""
     st.header("📣 Communication")
-    st.caption("Créez une activité une seule fois. Depuis sa fiche, ajoutez autant d'actions de communication, d'interventions médias ou de productions que nécessaire.")
-    st.markdown('<div class="section-banner"><span>FICHE ACTIVITÉ</span><strong>Activité • Actions réalisées • Médias • Liens et preuves</strong></div>', unsafe_allow_html=True)
-
-    with st.expander("➕ Créer une activité", expanded=False):
-        with st.form("communication_activity_master_form", clear_on_submit=True):
-            c1, c2, c3 = st.columns(3)
-            title = c1.text_input("Nom de l’activité *")
-            kind = c2.selectbox("Type d’activité", ["Animation scientifique", "Atelier", "Réunion", "Formation", "Conférence", "Séminaire", "Visite", "Mission", "Communication", "Autre"])
-            domain = c3.text_input("Domaine")
-            c1, c2, c3 = st.columns(3)
-            start = c1.date_input("Date de début", date.today())
-            end = c2.date_input("Date de fin", date.today())
-            status = c3.selectbox("Statut", ["Prévue", "En préparation", "Réalisée", "Reportée", "Annulée"])
-            c1, c2, c3 = st.columns(3)
-            place = c1.text_input("Lieu")
-            region = c2.text_input("Région")
-            manager = c3.text_input("Responsable")
-            objectives = st.text_area("Objectifs")
-            description = st.text_area("Description de l’activité")
-            outcome = st.text_area("Résultats globaux")
-            evidence_link = drive_link_input("Lien vers le dossier de preuves", key="communication_master_evidence")
-            notes = st.text_area("Observations")
-            save_master = st.form_submit_button("💾 Créer la fiche activité", type="primary")
-        if save_master:
-            if not title.strip():
-                st.error("Le nom de l’activité est obligatoire.")
-            elif end < start:
-                st.error("La date de fin doit être égale ou postérieure à la date de début.")
-            else:
-                reference = f"ACT-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
-                q("""INSERT INTO activities(reference,titre,type_activite,domaine,date_activite,date_fin,lieu,region,responsable,objectifs,description,resultats,lien_ressource,observations,statut) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""", (reference,title.strip(),kind,domain,str(start),str(end),place,region,manager,objectives,description,outcome,evidence_link,notes,status))
-                st.success(f"Fiche créée : {reference}. Ouvrez-la ci-dessous pour ajouter ses actions.")
-                st.rerun()
-
-    activity_frame = df("SELECT id,reference,titre,type_activite,date_activite,date_fin,lieu,responsable,description,objectifs,resultats,lien_ressource,observations,statut FROM activities ORDER BY date_activite DESC NULLS LAST,id DESC")
-    if activity_frame.empty:
-        st.info("Aucune activité pour le moment. Créez la première fiche ci-dessus.")
-        return
-    activity_options = {f"{r.reference or 'ACT'} — {r.titre} ({r.date_activite or 'date non précisée'})": int(r.id) for r in activity_frame.itertuples()}
-    selected_label = st.selectbox("Ouvrir une fiche activité", list(activity_options), key="communication_master_activity_selector")
-    activity_id = activity_options[selected_label]
-    activity_record = df("SELECT * FROM activities WHERE id=?", (activity_id,))
-    if activity_record.empty:
-        st.warning("Cette activité n’est plus disponible.")
-        return
-    activity = activity_record.iloc[0].to_dict()
-    st.markdown("### Fiche activité sélectionnée")
-    summary_cols = st.columns(4)
-    summary_cols[0].metric("Référence", str(activity.get("reference") or f"ID {activity_id}"))
-    summary_cols[1].metric("Début", str(activity.get("date_activite") or "—"))
-    summary_cols[2].metric("Fin", str(activity.get("date_fin") or activity.get("date_activite") or "—"))
-    summary_cols[3].metric("Statut", str(activity.get("statut") or "—"))
-    st.write(f"**{activity.get('titre') or ''}** · {activity.get('type_activite') or 'Activité'} · {activity.get('lieu') or 'Lieu non précisé'}")
-    if activity.get("description"):
-        st.write(activity.get("description"))
-    with st.expander("Voir tous les détails de l’activité"):
-        st.json({k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in activity.items() if k not in ("id", "created_at")})
-
-    st.markdown("### Ajouter une action à cette fiche")
-    st.caption("Enregistrez une action, puis recommencez pour en ajouter une deuxième ou une troisième à la même activité.")
-    with st.form("communication_child_action_form", clear_on_submit=True):
-        category = st.selectbox("Nature de l’action", ["Action de communication", "Presse et médias", "Production audiovisuelle"])
-        c1, c2, c3 = st.columns(3)
-        action_title = c1.text_input("Action réalisée / titre *")
-        action_type = c2.selectbox("Type", ["Affiche", "Invitation", "Communiqué", "Dossier de presse", "Article", "Reportage", "Interview", "Photographie", "Vidéo", "Film", "Brochure", "Publication web", "Émission", "Autre"])
-        action_date = c3.date_input("Date de réalisation / publication", date.today())
-        c1, c2, c3 = st.columns(3)
-        structure = c1.text_input("Structure / partenaire impliqué")
-        channel = c2.selectbox("Canal / support", ["Site web", "Facebook", "LinkedIn", "YouTube", "WhatsApp", "Radio", "Télévision", "Presse écrite", "Presse en ligne", "Magazine", "Autre"])
-        contact = c3.text_input("Responsable / journaliste / personne interviewée")
-        method = st.text_area("Comment l’action a été réalisée")
-        action_description = st.text_area("Contenu / sujet / résultat")
-        action_link = drive_link_input("Lien web, publication ou dossier de preuves", key="communication_child_action_link")
-        c1, c2, c3 = st.columns(3)
-        views = c1.number_input("Vues", min_value=0, step=1)
-        reactions = c2.number_input("Réactions", min_value=0, step=1)
-        shares = c3.number_input("Partages", min_value=0, step=1)
-        action_notes = st.text_area("Autres observations")
-        save_action = st.form_submit_button("➕ Ajouter cette action à la fiche", type="primary")
-    if save_action:
-        if not action_title.strip():
-            st.error("Le titre de l’action est obligatoire.")
     st.caption("Une activité, puis ses actions sur la même fiche. Indiquez leur nombre ; chaque action tient en quelques champs.")
     st.markdown('<div class="section-banner"><span>FICHE ACTIVITÉ</span><strong>Activité + actions de communication</strong></div>',unsafe_allow_html=True)
     action_count=st.number_input("Nombre d’actions de communication",min_value=0,value=0,step=1,key="communication_action_count")
@@ -2647,14 +2564,6 @@ def render_communication():
         if not title.strip(): st.error("Le nom de l’activité est obligatoire.")
         elif end<start: st.error("La date de fin doit être égale ou postérieure à la date de début.")
         else:
-            combined_notes = " | ".join(x for x in [f"Structure : {structure}" if structure.strip() else "", f"Méthode : {method}" if method.strip() else "", f"Détails : {action_description}" if action_description.strip() else "", f"Contact : {contact}" if contact.strip() else "", action_notes.strip()] if x)
-            if category == "Action de communication":
-                q("INSERT INTO communications(activity_id,titre,type_action,plateforme,date_publication,lien,vues,reactions,partages,observations) VALUES(?,?,?,?,?,?,?,?,?,?)", (activity_id,action_title.strip(),action_type,channel,str(action_date),action_link,views,reactions,shares,combined_notes))
-            elif category == "Presse et médias":
-                q("INSERT INTO media(activity_id,media_name,media_type,journaliste,personne_interviewee,sujet,date_intervention,type_intervention,lien,observations) VALUES(?,?,?,?,?,?,?,?,?,?)", (activity_id,action_title.strip(),channel,contact,contact,action_description,str(action_date),action_type,action_link,combined_notes))
-            else:
-                q("INSERT INTO audiovisual(activity_id,titre,type_production,date_production,theme,interviewes,responsable,lien,observations) VALUES(?,?,?,?,?,?,?,?,?)", (activity_id,action_title.strip(),action_type,str(action_date),action_description,contact,structure,action_link,combined_notes))
-            st.success("Action ajoutée à la fiche activité.")
             reference=f"ACT-{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
             activity_id=q("INSERT INTO activities(reference,titre,type_activite,domaine,date_activite,date_fin,heure_debut,heure_fin,lieu,region,localite,responsable,description,objectifs,resultats,lien_ressource,observations,statut) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id",(reference,title.strip(),kind,domain,str(start),str(end),start_time,end_time,place,region,locality,manager,description,objectives,outcome,evidence_link,activity_notes,status))
             for action in actions:
@@ -2662,72 +2571,9 @@ def render_communication():
             st.success(f"Fiche enregistrée : {title} — {len(actions)} action(s) de communication.")
             st.rerun()
 
-    actions = df("""
-        SELECT 'Action de communication' AS categorie,titre AS action,type_action AS type,
-               date_publication::text AS date,plateforme AS support,lien,observations
-        FROM communications WHERE activity_id=?
-        UNION ALL
-        SELECT 'Presse et médias',media_name,type_intervention,date_intervention::text,media_type,lien,observations
-        FROM media WHERE activity_id=?
-        UNION ALL
-        SELECT 'Production audiovisuelle',titre,type_production,date_production::text,theme,lien,observations
-        FROM audiovisual WHERE activity_id=?
-        ORDER BY date NULLS LAST,action
-    """, (activity_id,activity_id,activity_id))
-    st.markdown(f"### Actions enregistrées dans cette fiche ({len(actions)})")
-    if actions.empty:
-        st.info("Aucune action liée. Ajoutez la première avec le formulaire ci-dessus.")
-    else:
-        st.dataframe(actions, use_container_width=True, hide_index=True, column_config={"lien": st.column_config.LinkColumn("Lien / preuve", display_text="Ouvrir ↗")})
-
-    activity_fields = {f"Activité — {k}": v for k, v in activity.items() if k not in ("id", "created_at")}
-    action_rows = actions.to_dict(orient="records") if not actions.empty else [{"categorie": "Aucune action ajoutée", "action": "—"}]
-    dossier = pd.DataFrame([{"Fiche": activity.get("reference") or activity_id, **activity_fields, **{f"Action — {k}": v for k, v in row.items()}} for row in action_rows])
-    st.markdown("#### Rapport complet de cette activité")
-    st.caption("Un seul export rassemble les informations de l’activité et toutes ses actions liées.")
-    export_buttons(dossier, f"fiche_activite_{activity_id}", f"Fiche complète — {activity.get('titre') or selected_label}")
-
-    with st.expander("Référentiel des formats de communication"):
-        _communication_formats()
-
-
 def render_documentations():
-    """Une fiche documentaire regroupe la ressource et ses consultations/prêts."""
     """Une seule fiche document avec le nombre choisi de consultations et de prêts."""
     st.header("📚 Documentations")
-    st.caption("Chaque ressource possède une fiche. Les consultations et les prêts se rattachent directement au document sélectionné.")
-    st.markdown('<div class="section-banner"><span>FICHE DOCUMENTAIRE</span><strong>Ressource • Consultations • Prêts et retours</strong></div>', unsafe_allow_html=True)
-    with st.expander("➕ Créer une fiche documentaire",expanded=False):
-        with st.form("documentation_master_form"):
-            source=st.selectbox("Type de ressource",["Fonds bibliothèque","Ressource documentaire / IST"])
-            c1,c2,c3=st.columns(3)
-            titre=c1.text_input("Titre *"); auteurs=c2.text_input("Auteur(s)"); annee=c3.number_input("Année",1900,2100,value=date.today().year)
-            c1,c2,c3=st.columns(3)
-            type_doc=c1.selectbox("Type de document",["Livre","Article scientifique","Rapport","Mémoire","Thèse","Document technique","Brochure","Revue / bulletin","Autre"])
-            theme=c2.text_input("Domaine / thématique"); mots=c3.text_input("Mots-clés")
-            c1,c2=st.columns(2)
-            editeur=c1.text_input("Éditeur / projet"); emplacement=c2.text_input("Localisation")
-            c1,c2,c3=st.columns(3)
-            inventaire=c1.text_input("N° inventaire"); cote=c2.text_input("Cote"); isbn=c3.text_input("ISBN / DOI / référence")
-            resume=st.text_area("Résumé / description")
-            lien=drive_link_input("Lien du document",key="documentation_master_link")
-            c1,c2=st.columns(2)
-            copies=c1.number_input("Exemplaires (fonds bibliothèque)",1,10000,1); disponibles=c2.number_input("Exemplaires disponibles",0,10000,1)
-            c1,c2,c3=st.columns(3)
-            etat=c1.selectbox("État du fonds",["Bon","Moyen","À restaurer","Endommagé"]); format_doc=c2.selectbox("Format",["Papier","Numérique","Papier + numérique"]); langue=c3.text_input("Langue",value="Français")
-            pages=st.number_input("Nombre de pages",0,step=1)
-            chercheur=st.text_input("Chercheur associé")
-            observations=st.text_area("Observations")
-            save_doc=st.form_submit_button("💾 Créer la fiche documentaire",type="primary")
-        if save_doc:
-            if not titre.strip(): st.error("Le titre est obligatoire.")
-            elif source=="Fonds bibliothèque" and disponibles>copies: st.error("Les exemplaires disponibles ne peuvent dépasser le nombre total.")
-            else:
-                if source=="Fonds bibliothèque":
-                    q("INSERT INTO library_items(inventaire,cote,isbn,titre,auteurs,editeur,annee,type_document,domaine,thematique,mots_cles,exemplaires,disponibles,localisation,etat,format_document,resume,lien,observations) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(inventaire or None,cote,isbn,titre,auteurs,editeur,annee,type_doc,theme,theme,mots,copies,disponibles,emplacement,etat,format_doc,resume,lien,observations))
-                else:
-                    q("INSERT INTO documents(titre,auteurs,annee,type_document,thematique,mots_cles,chercheur_associe,projet,resume,langue,pages,reference,lien,statut,observations) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(titre,auteurs,annee,type_doc,theme,mots,chercheur,editeur,resume,langue,pages,isbn,lien,"Disponible",observations))
-                st.success("Fiche documentaire créée."); st.rerun()
     st.caption("Décrivez la ressource, indiquez le nombre de consultations et de prêts à enregistrer, puis remplissez leurs détails dans la même fiche.")
     st.markdown('<div class="section-banner"><span>UNE SEULE FICHE</span><strong>Document + consultations + prêts</strong></div>',unsafe_allow_html=True)
     consultation_count=st.number_input("Nombre de consultations à ajouter",min_value=0,value=0,step=1,key="doc_consultation_count")
@@ -2804,80 +2650,11 @@ def render_documentations():
             st.success(f"La fiche « {titre} » et ses {len(consultation_values)} consultation(s) / {len(loan_values)} prêt(s) ont été enregistrés ensemble.")
             st.rerun()
 
-    items=df("SELECT id,titre,auteurs,annee,type_document,exemplaires,disponibles,localisation,lien FROM library_items ORDER BY id DESC")
-    documents=df("SELECT id,titre,auteurs,annee,type_document,reference,lien FROM documents ORDER BY id DESC")
-    if items.empty and documents.empty:
-        st.info("Aucune ressource enregistrée. Créez la première fiche ci-dessus.")
     st.markdown("### Fiches documentaires enregistrées")
     items=df("SELECT id,titre,auteurs,annee,type_document,disponibles,lien FROM library_items ORDER BY id DESC")
     if items.empty:
         st.info("Aucune fiche documentaire enregistrée.")
         return
-    options={f"📗 {r.titre} — {r.auteurs or 'Auteur non précisé'} (ID {r.id})":("item",int(r.id)) for r in items.itertuples()}
-    options.update({f"📄 {r.titre} — {r.auteurs or 'Auteur non précisé'} (ID {r.id})":("document",int(r.id)) for r in documents.itertuples()})
-    selected=st.selectbox("Ouvrir une fiche documentaire",list(options),key="documentation_master_selector")
-    source_kind,resource_id=options[selected]
-    if source_kind=="item":
-        parent_df=df("SELECT * FROM library_items WHERE id=?",(resource_id,))
-        child_sql="""
-            SELECT 'Consultation' AS operation,c.date_consultation::text AS date,
-                   COALESCE(TRIM(COALESCE(p.prenom,'')||' '||COALESCE(p.nom,'')),'Visiteur non précisé') AS personne,
-                   c.type_consultation AS detail,c.observations
-            FROM consultations c LEFT JOIN people p ON p.id=c.person_id WHERE c.item_id=?
-            UNION ALL
-            SELECT 'Prêt',l.date_emprunt::text,
-                   COALESCE(TRIM(COALESCE(p.prenom,'')||' '||COALESCE(p.nom,'')),'Emprunteur non précisé'),
-                   'Retour prévu : '||l.date_retour_prevue::text||' — '||COALESCE(l.statut,''),l.observations
-            FROM loans l LEFT JOIN people p ON p.id=l.person_id WHERE l.item_id=?
-            ORDER BY date DESC
-        """
-    else:
-        parent_df=df("SELECT * FROM documents WHERE id=?",(resource_id,))
-        child_sql=None
-    parent=parent_df.iloc[0].to_dict() if not parent_df.empty else {}
-    st.markdown("### Fiche sélectionnée")
-    st.write(f"**{parent.get('titre','')}** · {parent.get('type_document','')} · {parent.get('annee','')}")
-    st.dataframe(parent_df.drop(columns=["id"],errors="ignore"),use_container_width=True,hide_index=True)
-    if source_kind=="item":
-        people=df("SELECT id,nom,prenom FROM people ORDER BY nom,prenom")
-        people_options={f"{r.nom} {r.prenom or ''} (ID {r.id})":int(r.id) for r in people.itertuples()}
-        st.markdown("### Ajouter une consultation ou un prêt à cette fiche")
-        with st.form("documentation_child_operation_form",clear_on_submit=True):
-            operation=st.selectbox("Opération",["Consultation","Prêt"])
-            person_label=st.selectbox("Personne (facultatif)",["—"]+list(people_options))
-            c1,c2=st.columns(2)
-            action_date=c1.date_input("Date",date.today()); due_date=c2.date_input("Date de retour prévue",date.today()+timedelta(days=14))
-            new_person=c1.text_input("Nom de la personne si elle n’est pas encore enregistrée")
-            notes=st.text_area("Observations")
-            save_child=st.form_submit_button("➕ Ajouter à cette fiche",type="primary")
-        if save_child:
-            person_id=people_options.get(person_label)
-            if new_person.strip():
-                parts=new_person.strip().split(" ",1)
-                q("INSERT INTO people(nom,prenom) VALUES(?,?)",(parts[0],parts[1] if len(parts)>1 else ""))
-                person_id=q("SELECT id FROM people WHERE nom=? AND COALESCE(prenom,'')=? ORDER BY id DESC LIMIT 1",(parts[0],parts[1] if len(parts)>1 else ""),fetch=True)[0]["id"]
-            if operation=="Consultation":
-                q("INSERT INTO consultations(person_id,item_id,date_consultation,type_consultation,observations) VALUES(?,?,?,?,?)",(person_id,resource_id,str(action_date),"Sur place",notes))
-                st.success("Consultation rattachée à la fiche."); st.rerun()
-            elif due_date<action_date:
-                st.error("La date de retour doit être après la date du prêt.")
-            elif int(scalar("SELECT COALESCE(disponibles,0) FROM library_items WHERE id=?",(resource_id,)) or 0) < 1:
-                st.error("Aucun exemplaire n’est disponible pour un nouveau prêt.")
-            else:
-                q("INSERT INTO loans(person_id,item_id,date_emprunt,date_retour_prevue,statut,observations) VALUES(?,?,?,?,?,?)",(person_id,resource_id,str(action_date),str(due_date),"En cours",notes))
-                q("UPDATE library_items SET disponibles=GREATEST(COALESCE(disponibles,0)-1,0) WHERE id=?",(resource_id,))
-                st.success("Prêt rattaché à la fiche."); st.rerun()
-        linked=df(child_sql,(resource_id,resource_id))
-        st.markdown(f"### Consultations et prêts rattachés ({len(linked)})")
-        if linked.empty: st.info("Aucune consultation ni aucun prêt pour cette ressource.")
-        else: st.dataframe(linked,use_container_width=True,hide_index=True)
-        parent_fields={f"Document — {k}":v for k,v in parent.items() if k!="id"}
-        rows=linked.to_dict(orient="records") if not linked.empty else [{"operation":"Aucune opération enregistrée"}]
-        dossier=pd.DataFrame([{**parent_fields,**{f"Suivi — {k}":v for k,v in row.items()}} for row in rows])
-        export_buttons(dossier,f"fiche_document_{resource_id}",f"Fiche documentaire — {parent.get('titre','')}")
-    else:
-        st.info("Cette ressource IST est centralisée dans une fiche unique. Les consultations et prêts peuvent être rattachés aux ouvrages du fonds bibliothèque.")
-        export_buttons(parent_df,f"fiche_ressource_{resource_id}",f"Fiche ressource — {parent.get('titre','')}")
     choices={f"{r.titre} — {r.auteurs or 'Auteur non précisé'} ({r.annee or 'année non précisée'})":int(r.id) for r in items.itertuples()}
     selected=st.selectbox("Consulter une fiche complète",list(choices),key="documentation_complete_selector")
     item_id=choices[selected]
@@ -2898,10 +2675,6 @@ def render_documentations():
     report=pd.DataFrame([{**parent,**{f"Suivi — {k}":v for k,v in row.items()}} for row in children])
     export_buttons(report,f"fiche_complete_document_{item_id}",f"Fiche complète document — {item.get('titre')}")
     st.markdown("### Catalogue documentaire")
-    library_all=df("SELECT id,titre,auteurs,annee,type_document,localisation,disponibles,lien,'Fonds bibliothèque' AS origine FROM library_items")
-    docs_all=df("SELECT id,titre,auteurs,annee,type_document,NULL::text AS localisation,NULL::bigint AS disponibles,lien,'Ressource IST' AS origine FROM documents")
-    catalog=pd.concat([library_all,docs_all],ignore_index=True,sort=False)
-    st.dataframe(catalog,use_container_width=True,hide_index=True,column_config={"lien":st.column_config.LinkColumn("Lien",display_text="Ouvrir ↗")})
     st.dataframe(items,use_container_width=True,hide_index=True,column_config={"lien":st.column_config.LinkColumn("Lien",display_text="Ouvrir ↗")})
 
 
@@ -2951,32 +2724,8 @@ def render_visitors():
         c2.metric("Visiteurs / structures renseignés",visits["structure"].notna().sum() if "structure" in visits.columns else 0)
 
 def render_researchers():
-    """Une fiche chercheur regroupe son profil et toutes ses actions de valorisation."""
     """Une fiche unique pour le chercheur et le nombre choisi d’actions de valorisation."""
     st.header("🧬 Valorisation des chercheurs")
-    st.caption("Créez le profil une seule fois, puis ajoutez chaque action directement à la fiche du chercheur.")
-    st.markdown('<div class="section-banner"><span>FICHE CHERCHEUR</span><strong>Profil • Expertise • Productions • Valorisation</strong></div>', unsafe_allow_html=True)
-    with st.expander("➕ Créer un profil chercheur", expanded=False):
-        with st.form("researcher_master_form"):
-            c1,c2,c3=st.columns(3)
-            nom=c1.text_input("Nom *"); prenom=c2.text_input("Prénom"); fonction=c3.text_input("Grade / fonction")
-            c1,c2,c3=st.columns(3)
-            unite=c1.text_input("Unité / laboratoire"); domaine=c2.text_input("Domaine d’expertise"); mots=c3.text_input("Mots-clés")
-            c1,c2,c3=st.columns(3)
-            email=c1.text_input("E-mail"); telephone=c2.text_input("Téléphone"); orcid=c3.text_input("ORCID")
-            bio=st.text_area("Biographie courte")
-            profil=st.text_area("Profil scientifique complet",height=130)
-            photo=drive_link_input("Photo / portrait",key="researcher_master_photo")
-            cv=drive_link_input("CV / dossier professionnel",key="researcher_master_cv")
-            lien=drive_link_input("Page institutionnelle / ORCID",key="researcher_master_link")
-            observations=st.text_area("Observations")
-            save_profile=st.form_submit_button("💾 Créer le profil",type="primary")
-        if save_profile:
-            if not nom.strip(): st.error("Le nom du chercheur est obligatoire.")
-            else:
-                q("INSERT INTO researcher_profiles(nom,prenom,grade_fonction,unite_laboratoire,domaine_expertise,mots_cles,biographie,profil_complet,email,telephone,ORCID,photo,cv_fichier,lien_profil,observations) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(nom,prenom,fonction,unite,domaine,mots,bio,profil,email,telephone,orcid,photo,cv,lien,observations))
-                st.success("Profil créé. Vous pouvez maintenant ajouter des actions à cette fiche."); st.rerun()
-    profiles=df("SELECT id,nom,prenom,grade_fonction,unite_laboratoire,domaine_expertise,email,ORCID,photo,cv_fichier,lien_profil FROM researcher_profiles ORDER BY nom,prenom")
     st.caption("Renseignez le profil du chercheur, indiquez le nombre de ses actions, puis complétez chaque action avant d’enregistrer une seule fiche.")
     st.markdown('<div class="section-banner"><span>UNE SEULE FICHE</span><strong>Profil du chercheur + toutes ses actions</strong></div>',unsafe_allow_html=True)
     action_count=st.number_input("Combien d’actions de valorisation ajouter à cette fiche ?",min_value=0,value=0,step=1,key="researcher_action_count")
@@ -3018,38 +2767,8 @@ def render_researchers():
     st.markdown("### Fiches chercheurs enregistrées")
     profiles=df("SELECT id,nom,prenom,grade_fonction,unite_laboratoire,domaine_expertise,email,ORCID FROM researcher_profiles ORDER BY id DESC")
     if profiles.empty:
-        st.info("Aucun profil chercheur. Créez-en un pour commencer.")
         st.info("Aucune fiche chercheur enregistrée.")
         return
-    options={f"{r.nom} {r.prenom or ''} — {r.grade_fonction or 'Chercheur'} (ID {r.id})":int(r.id) for r in profiles.itertuples()}
-    selected=st.selectbox("Ouvrir une fiche chercheur",list(options),key="researcher_master_selector")
-    researcher_id=options[selected]
-    full_profile=df("SELECT * FROM researcher_profiles WHERE id=?",(researcher_id,))
-    if not full_profile.empty:
-        st.markdown("### Profil sélectionné")
-        st.dataframe(full_profile.drop(columns=["id","created_at"],errors="ignore"),use_container_width=True,hide_index=True,column_config={"photo":st.column_config.LinkColumn("Photo",display_text="Ouvrir ↗"),"cv_fichier":st.column_config.LinkColumn("CV",display_text="Ouvrir ↗"),"lien_profil":st.column_config.LinkColumn("Profil",display_text="Ouvrir ↗")})
-    st.markdown("### Ajouter une action à cette fiche")
-    with st.form("researcher_master_action_form",clear_on_submit=True):
-        c1,c2,c3=st.columns(3)
-        da=c1.date_input("Date",date.today()); type_val=c2.selectbox("Type de valorisation",["Article","Interview","Portrait","Vidéo","Publication","Communication scientifique","Conférence","Démonstration","Autre"]); domaine=c3.text_input("Domaine")
-        c1,c2=st.columns(2)
-        theme=c1.text_input("Thématique"); projet=c2.text_input("Projet")
-        support=st.text_input("Support / structure")
-        lien=drive_link_input("Lien web / photo / vidéo / document",key="researcher_master_action_link")
-        observations=st.text_area("Observations")
-        save_action=st.form_submit_button("➕ Ajouter à la fiche chercheur",type="primary")
-    if save_action:
-        vid=q("INSERT INTO researcher_valorization(date_action,domaine,thematique,projet,type_valorisation,support,lien,observations) VALUES(?,?,?,?,?,?,?,?) RETURNING id",(str(da),domaine,theme,projet,type_val,support,lien,observations))
-        q("INSERT INTO researcher_valorization_researchers(valorization_id,researcher_id) VALUES(?,?) ON CONFLICT DO NOTHING",(vid,researcher_id))
-        st.success("Action ajoutée à cette fiche."); st.rerun()
-    actions=df("SELECT rv.date_action,rv.domaine,rv.thematique,rv.projet,rv.type_valorisation,rv.support,rv.lien,rv.observations FROM researcher_valorization rv JOIN researcher_valorization_researchers rvr ON rvr.valorization_id=rv.id WHERE rvr.researcher_id=? ORDER BY rv.date_action DESC,rv.id DESC",(researcher_id,))
-    st.markdown(f"### Actions rattachées ({len(actions)})")
-    if actions.empty: st.info("Aucune action de valorisation n’est encore rattachée à cette fiche.")
-    else: st.dataframe(actions,use_container_width=True,hide_index=True,column_config={"lien":st.column_config.LinkColumn("Lien",display_text="Ouvrir ↗")})
-    parent=full_profile.iloc[0].to_dict() if not full_profile.empty else {}
-    action_rows=actions.to_dict(orient="records") if not actions.empty else [{"Action":"Aucune action enregistrée"}]
-    dossier=pd.DataFrame([{"Fiche chercheur":selected,**{f"Profil — {k}":v for k,v in parent.items() if k not in ("id","created_at")},**{f"Valorisation — {k}":v for k,v in row.items()}} for row in action_rows])
-    export_buttons(dossier,f"fiche_chercheur_{researcher_id}",f"Fiche chercheur — {selected}")
     st.dataframe(profiles,use_container_width=True,hide_index=True)
     options={f"{r.nom} {r.prenom or ''} — ID {r.id}":int(r.id) for r in profiles.itertuples()}
     chosen=st.selectbox("Ouvrir le rapport d’une fiche",list(options),key="researcher_complete_report_selector")
@@ -3392,7 +3111,6 @@ def render_reports():
 
 
     def _normalized_communication_frame(frame, origin, mapping):
-        columns = ["Origine", "categorie", "titre", "type", "date", "canal", "responsable", "lien", "observations"]
         columns = ["Origine", "categorie", "titre", "type", "date", "canal", "structure", "responsable",
                    "vues", "reactions", "commentaires", "partages", "telechargements", "lien", "observations"]
         if frame is None or frame.empty:
@@ -3406,20 +3124,6 @@ def render_reports():
                 result[col] = ""
         return result[columns]
 
-    communication_unifiee = pd.concat([
-        _normalized_communication_frame(communications, "Action de communication", {
-            "categorie":"categorie", "titre":"titre", "type":"type_action", "date":"date_publication",
-            "canal":"plateforme", "responsable":"", "lien":"lien", "observations":"observations"}),
-        _normalized_communication_frame(media_df, "Presse et médias", {
-            "categorie":"media_type", "titre":"media_name", "type":"type_intervention", "date":"date_intervention",
-            "canal":"sujet", "responsable":"journaliste", "lien":"lien", "observations":"observations"}),
-        _normalized_communication_frame(av, "Production audiovisuelle", {
-            "categorie":"type_production", "titre":"titre", "type":"type_production", "date":"date_production",
-            "canal":"theme", "responsable":"responsable", "lien":"lien", "observations":"observations"}),
-        _normalized_communication_frame(formats, "Format de communication", {
-            "categorie":"categorie", "titre":"nom_format", "type":"categorie", "date":"", "canal":"norme",
-            "responsable":"", "lien":"lien_reference", "observations":"observations"}),
-    ], ignore_index=True, sort=False)
     communication_mapping = {
         "categorie": "categorie",
         "titre": "titre",
@@ -3830,19 +3534,14 @@ elif page == "🏠 Tableau de bord":
     render_dashboard()
 elif page == "📣 Communication":
     render_communication()
-    render_record_manager(page)
 elif page == "📚 Documentations":
     render_documentations()
-    render_record_manager(page)
 elif page == "🔬 Résultats scientifiques":
     render_scientific_results()
-    render_record_manager(page)
 elif page == "👥 Visiteurs":
     render_visitors()
-    render_record_manager(page)
 elif page == "🧬 Valorisation chercheurs":
     render_researchers()
-    render_record_manager(page)
 elif page == "👤 Profil":
     render_profile()
 elif page == "📊 Rapports & exports":
