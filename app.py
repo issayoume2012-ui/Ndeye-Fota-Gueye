@@ -188,7 +188,7 @@ def drive_link_input(label="Lien Google Drive / URL", key=None, help_text=None):
 # AUTHENTIFICATION
 # -----------------------------
 # Identifiants demandés pour l'accès à l'application.
-APP_USERNAME = "Ndeye Fota Gueye"
+APP_USERNAME = "Fota Gueye"
 APP_PASSWORD = "nfg2026"
 APP_PAGES = ["🏠 Tableau de bord", "📣 Communication", "📚 Documentations", "🔬 Résultats scientifiques", "👥 Visiteurs", "🧬 Valorisation chercheurs", "👤 Profil", "📊 Rapports & exports"]
 
@@ -307,7 +307,7 @@ def show_login():
     </div>
     """, unsafe_allow_html=True)
     with st.form("login_form", clear_on_submit=False):
-        username = st.text_input("Nom d'utilisateur", placeholder="Ndeye Fota Gueye")
+        username = st.text_input("Nom d'utilisateur", placeholder="Fota Gueye")
         password = st.text_input("Mot de passe", type="password", placeholder="••••••••")
         submitted = st.form_submit_button("🔐 Se connecter", type="primary", use_container_width=True)
     if submitted:
@@ -724,6 +724,9 @@ def verify_password(password, stored):
 if scalar("SELECT COUNT(*) FROM app_users") == 0:
     q("INSERT INTO app_users(username,full_name,password_hash,job_title,department,profile_text,allowed_pages,is_admin,can_add,can_edit,can_delete) VALUES(?,?,?,?,?,?,?::jsonb,TRUE,TRUE,TRUE,TRUE)",
       (APP_USERNAME, APP_USERNAME, hash_password(APP_PASSWORD), "Chargée de la communication et documentation", "CRA/ISRA Saint-Louis", "Administratrice principale de la plateforme.", json.dumps(APP_PAGES, ensure_ascii=False)))
+# Renomme le compte initial existant sans toucher à son mot de passe ni à ses droits.
+q("UPDATE app_users SET username=?, full_name=? WHERE LOWER(username)=LOWER(?) AND NOT EXISTS (SELECT 1 FROM app_users WHERE LOWER(username)=LOWER(?))",
+  ("Fota Gueye", "Fota Gueye", "Ndeye Fota Gueye", "Fota Gueye"))
 
 if not st.session_state.get("authenticated", False):
     show_login()
@@ -962,7 +965,7 @@ def _pdf_header_footer(canvas, doc):
     canvas.line(34, 31, w - 34, 31)
     canvas.setFillColor(grey)
     canvas.setFont("Helvetica", 7)
-    canvas.drawString(34, 19, "Registre interne CRA/ISRA • Ndeye Fota Gueye")
+    canvas.drawString(34, 19, "Registre interne CRA/ISRA • Fota Gueye")
     canvas.drawRightString(w - 34, 19, f"Page {doc.page}")
 
     canvas.restoreState()
@@ -1596,11 +1599,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     Architecture du document :
       01. Synthèse exécutive
       02. Communication
-          2.1 Activités — centre de Communication
-          2.2 Actions de communication
-          2.3 Presse & médias
-          2.4 Audiovisuel
-          2.5 Formats de communication
+          2.1 Fiches de communication — activité et compléments réunis
       03. Documentations
           3.1 Catalogue documentaire unifié
           3.2 Consultations
@@ -1616,8 +1615,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
           4.7 Notes de synthèse
       05. Visiteurs
       06. Valorisation chercheurs
-          6.1 Profils chercheurs
-          6.2 Actions de valorisation
+          6.1 Fiches chercheurs — profil et valorisation réunis
       07. Profil / identité du responsable
 
     Cette hiérarchie correspond directement aux espaces de navigation
@@ -1741,7 +1739,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
             [[
                 Paragraph(
                     "<b>Responsable</b><br/>"
-                    f"{report_profile.get('nom', 'Ndeye Fota Gueye')}<br/>"
+                    f"{report_profile.get('nom', 'Fota Gueye')}<br/>"
                     f"{report_profile.get('fonction', 'Chargée de la communication et documentation de CRA/ISRA Saint-Louis')}",
                     body,
                 ),
@@ -1786,8 +1784,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     ))
 
     kpi_order = [
-        ("Activités", report_data.get("Activités")),
-        ("Compléments de communication — registre unique", report_data.get("Compléments de communication", pd.DataFrame())),
+        ("Fiches activités + compléments de communication", report_data.get("Activités")),
         ("Publications scientifiques", report_data.get("Publications scientifiques — ressources", pd.DataFrame())),
         ("Catalogue documentaire", report_data.get("Catalogue", pd.DataFrame())),
         ("🧾 Fiches techniques", report_data.get("Fiches techniques", pd.DataFrame())),
@@ -1825,8 +1822,8 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     # Tableau de synthèse des espaces
     synthesis_rows = [
         ["Espace", "Contenu", "Enregistrements"],
-        ["Communication", "Activités (centre) et registre unique des compléments de communication",
-         str(len(report_data.get("Activités", pd.DataFrame())) + len(report_data.get("Compléments de communication", pd.DataFrame())))],
+        ["Communication", "Une fiche par activité avec l’ensemble des compléments de communication",
+         str(len(report_data.get("Activités", pd.DataFrame())))],
         ["Documentations", "Catalogue documentaire unique, consultations, prêts/retours et personnes",
          str(sum(len(report_data.get(k, pd.DataFrame())) for k in [
              "Catalogue", "Consultations", "Prêts", "Personnes"
@@ -1835,10 +1832,8 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
          str(sum(len(report_data.get(k, pd.DataFrame())) for k in ["Fiches techniques", "Mémoires", "Thèses", "Rapports scientifiques", "Résultats scientifiques — autres types", "Publications scientifiques", "Notes politiques", "Notes de synthèse"]))],
         ["Visiteurs", "Registre des visiteurs",
          str(len(report_data.get("Visiteurs", pd.DataFrame())))],
-        ["Valorisation chercheurs", "Profils et actions de valorisation",
-         str(sum(len(report_data.get(k, pd.DataFrame())) for k in [
-             "Profils chercheurs", "Valorisation chercheurs"
-         ]))],
+        ["Valorisation chercheurs", "Une fiche par chercheur avec ses actions de valorisation",
+         str(len(report_data.get("Valorisation chercheurs", pd.DataFrame())))],
     ]
     synth_df = pd.DataFrame(synthesis_rows[1:], columns=synthesis_rows[0])
     story.append(_pdf_table(synth_df, body, head))
@@ -1849,22 +1844,12 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     # ------------------------------------------------------------
     story.extend(_pdf_section_header(
         "02", "COMMUNICATION",
-        "Activités au centre et un registre unique de compléments de communication réunissant actions, médias, audiovisuel et formats.",
+        "Une fiche par activité réunit l’activité et l’ensemble de ses compléments de communication.",
         section
     ))
 
     # Vues PDF lisibles : les DataFrames originaux restent inchangés pour l'Excel.
-    activities_pdf = _pdf_report_view(
-        report_data.get("Activités"),
-        ["id", "date_activite", "date_fin", "duree_jours", "heure_debut", "heure_fin", "created_at",
-         "titre", "type_activite", "objectifs", "description", "heures", "resultats_attendus",
-         "lieu", "responsable", "lien_ressource", "statut", "observations"],
-        {"id":"ID", "date_activite":"Date activité", "date_fin":"Date fin", "duree_jours":"Durée (jours)",
-         "heure_debut":"Heure début", "heure_fin":"Heure fin", "created_at":"Créé le",
-         "titre":"Activité", "type_activite":"Type", "objectifs":"Objectifs",
-         "description":"Description", "heures":"Heures", "resultats_attendus":"Résultats attendus",
-         "lieu":"Lieu", "responsable":"Responsable", "lien_ressource":"Photos / vidéos / dossier Drive", "statut":"Statut", "observations":"Observations"},
-    )
+    activities_pdf = report_data.get("Activités")
     communication_pdf = _pdf_report_view(
         report_data.get("Communication"),
         ["id", "date_publication", "titre", "type_action", "plateforme", "lien", "vues", "reactions", "commentaires", "partages", "telechargements", "observations"],
@@ -1895,12 +1880,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     )
 
     communication_sections = [
-        ("2.1", "Activités — centre de Communication", "Toutes les activités déjà enregistrées dans la plateforme. Elles constituent le centre de l'espace Communication.", activities_pdf),
-        ("2.2", "Compléments de communication — registre unique", "Tableau unifié réunissant actions de communication, presse et médias, productions audiovisuelles et formats.", _pdf_report_view(
-            report_data.get("Compléments de communication"),
-            ["Origine", "categorie", "titre", "type", "date", "canal", "responsable", "lien", "observations"],
-            {"Origine":"Source", "categorie":"Catégorie", "titre":"Titre / contenu", "type":"Type", "date":"Date", "canal":"Canal / thème", "responsable":"Responsable / journaliste", "lien":"Lien web", "observations":"Observations"},
-        )),
+        ("2.1", "Fiches de communication — une fiche par activité", "Chaque ligne rassemble l’activité et tous ses compléments rattachés. Les compléments historiques sans activité sont regroupés dans une fiche dédiée.", activities_pdf),
     ]
 
     for num, title, desc, frame in communication_sections:
@@ -1998,14 +1978,12 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     # ------------------------------------------------------------
     story.extend(_pdf_section_header(
         "06", "VALORISATION CHERCHEURS",
-        "Profils des chercheurs et actions de valorisation associées.",
+        "Une fiche par chercheur rassemble son profil et toutes ses actions de valorisation.",
         section
     ))
 
     for num, title, desc, key in [
-        ("6.1", "Profils chercheurs", "Référentiel des chercheurs.", "Profils chercheurs"),
-        ("6.2", "Actions de valorisation", "Productions et actions associées aux chercheurs.",
-         "Valorisation chercheurs"),
+        ("6.1", "Fiches chercheurs et actions de valorisation", "Profil et actions réunis sur une seule fiche par chercheur.", "Valorisation chercheurs"),
     ]:
         story.append(Paragraph(f"{num} — {title}", subsection))
         story.append(Paragraph(desc, small))
@@ -2027,7 +2005,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
         section
     ))
 
-    profile_name = report_profile.get("nom", "Ndeye Fota Gueye")
+    profile_name = report_profile.get("nom", "Fota Gueye")
     profile_function = report_profile.get(
         "fonction",
         "Chargée de la communication et documentation de CRA/ISRA Saint-Louis"
@@ -2603,6 +2581,49 @@ def render_communication():
                 q("INSERT INTO communications(activity_id,titre,type_action,plateforme,date_publication,lien,structure,responsable,vues,reactions,commentaires,partages,telechargements,observations) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",(activity_id,action["type"],action["type"],action["channel"],str(start),action["link"],action["structure"],action["who"],action["views"],action["reactions"],action["comments"],action["shares"],action["downloads"],""))
             st.success(f"Fiche enregistrée : {title} — {len(actions)} action(s) de communication.")
             st.rerun()
+
+    # Les anciennes activités et leurs compléments restent consultables ici.
+    st.markdown("### Activités et compléments déjà enregistrés")
+    saved_activities = df("SELECT id,reference,titre,date_activite,date_fin,type_activite,statut FROM activities ORDER BY date_activite DESC NULLS LAST,id DESC")
+    if not saved_activities.empty:
+        activity_choices = {
+            f"{row.reference or 'ACT'} — {row.titre} ({row.date_activite or 'date non renseignée'}) · ID {row.id}": int(row.id)
+            for row in saved_activities.itertuples()
+        }
+        saved_label = st.selectbox("Choisir une activité enregistrée", list(activity_choices), key="communication_saved_activity_selector")
+        saved_id = activity_choices[saved_label]
+        activity_detail = df("SELECT * FROM activities WHERE id=?", (saved_id,))
+        if not activity_detail.empty:
+            st.markdown("#### Fiche de l’activité")
+            st.dataframe(activity_detail.drop(columns=[c for c in ("id", "created_at") if c in activity_detail.columns]), use_container_width=True, hide_index=True)
+        linked_actions = df("SELECT titre AS action,type_action AS type,plateforme AS canal,structure,responsable AS personne,date_publication AS date,lien,vues,reactions,commentaires,partages,telechargements,observations FROM communications WHERE activity_id=? ORDER BY date_publication NULLS LAST,id", (saved_id,))
+        linked_media = df("SELECT media_name AS action,media_type AS type,type_intervention AS format,journaliste AS personne,personne_interviewee,sujet,lieu,date_intervention AS date,lien,observations FROM media WHERE activity_id=? ORDER BY date_intervention NULLS LAST,id", (saved_id,))
+        linked_audiovisual = df("SELECT titre AS action,type_production AS type,theme,interviewes,responsable AS personne,date_production AS date,lien,observations FROM audiovisual WHERE activity_id=? ORDER BY date_production NULLS LAST,id", (saved_id,))
+        st.markdown("#### Actions de communication")
+        if not linked_actions.empty:
+            st.dataframe(linked_actions, use_container_width=True, hide_index=True, column_config={"lien": st.column_config.LinkColumn("Lien", display_text="Ouvrir ↗")})
+        else:
+            st.info("Aucune action de communication n’est encore rattachée à cette activité.")
+        with st.expander("Presse, médias et productions audiovisuelles", expanded=not linked_media.empty or not linked_audiovisual.empty):
+            if not linked_media.empty:
+                st.markdown("**Presse et médias**")
+                st.dataframe(linked_media, use_container_width=True, hide_index=True, column_config={"lien": st.column_config.LinkColumn("Lien", display_text="Ouvrir ↗")})
+            if not linked_audiovisual.empty:
+                st.markdown("**Audiovisuel**")
+                st.dataframe(linked_audiovisual, use_container_width=True, hide_index=True, column_config={"lien": st.column_config.LinkColumn("Lien", display_text="Ouvrir ↗")})
+    else:
+        st.info("Aucune activité enregistrée pour le moment.")
+
+    with st.expander("Compléments historiques sans activité rattachée", expanded=False):
+        legacy_comm = df("SELECT id,titre,type_action,plateforme,structure,responsable,date_publication,lien,vues,reactions,commentaires,partages,telechargements,observations FROM communications WHERE activity_id IS NULL ORDER BY date_publication DESC NULLS LAST,id DESC")
+        legacy_media = df("SELECT id,media_name,media_type,type_intervention,journaliste,personne_interviewee,sujet,date_intervention,lien,observations FROM media WHERE activity_id IS NULL ORDER BY date_intervention DESC NULLS LAST,id DESC")
+        legacy_av = df("SELECT id,titre,type_production,theme,responsable,date_production,lien,observations FROM audiovisual WHERE activity_id IS NULL ORDER BY date_production DESC NULLS LAST,id DESC")
+        legacy_formats = df("SELECT id,categorie,nom_format,description,usage_recommande,norme,lien_reference,observations FROM communication_formats ORDER BY categorie,nom_format")
+        for label, frame in [("Actions de communication", legacy_comm), ("Presse et médias", legacy_media), ("Audiovisuel", legacy_av), ("Formats de communication", legacy_formats)]:
+            st.markdown(f"**{label} ({len(frame)})**")
+            if not frame.empty:
+                st.dataframe(frame, use_container_width=True, hide_index=True)
+    render_record_manager("📣 Communication")
 
 def render_documentations():
     """Une seule fiche document avec le nombre choisi de consultations et de prêts."""
@@ -3233,13 +3254,27 @@ def render_reports():
         "FROM researcher_profiles ORDER BY nom, prenom"
     )
 
-    research_data = df("""
+    def _communication_action_lines(frame, label):
+        lines = []
+        if frame is None or frame.empty:
+            return lines
+        for number, (_, action_row) in enumerate(frame.iterrows(), 1):
+            values = action_row.to_dict()
+            action_title = values.get("titre") or values.get("titre_document") or values.get("media_name") or values.get("nom_format") or values.get("action") or "Action"
+            details = []
+            for key, value in values.items():
+                if key in {"id", "activity_id", "chercheur_id", "chercheurs", "created_at"} or value is None or (not isinstance(value, (list, dict)) and pd.isna(value)) or str(value).strip() == "":
+                    continue
+                details.append(f"{key.replace('_', ' ').capitalize()} : {value}")
+            lines.append(f"{label} {number} — {action_title}" + ("\n  " + " | ".join(details) if details else ""))
+        return lines
+
+    research_sql = """
         SELECT
             rv.id,
-            STRING_AGG(
-                TRIM(COALESCE(rp.prenom,'') || ' ' || rp.nom),
-                ', ' ORDER BY rp.nom
-            ) AS chercheurs,
+            rvr.researcher_id AS chercheur_id,
+            COALESCE(NULLIF(TRIM(COALESCE(rp.prenom,'') || ' ' || COALESCE(rp.nom,'')),''),
+                     NULLIF(TRIM(COALESCE(p.prenom,'') || ' ' || COALESCE(p.nom,'')),'')) AS chercheur,
             rv.date_action,
             rv.titre AS titre_document,
             rv.auteurs,
@@ -3259,10 +3294,45 @@ def render_reports():
             ON rvr.valorization_id=rv.id
         LEFT JOIN researcher_profiles rp
             ON rp.id=rvr.researcher_id
-        WHERE rv.date_action BETWEEN ? AND ?
-        GROUP BY rv.id
+        LEFT JOIN people p ON p.id=rv.person_id
+        WHERE (rv.date_action BETWEEN ? AND ?{undated_clause})
+        GROUP BY rv.id, rvr.researcher_id, rp.nom, rp.prenom, p.nom, p.prenom
         ORDER BY rv.date_action, rv.id
-    """, (str(start), str(end)))
+    """.format(undated_clause=" OR rv.date_action IS NULL" if include_undated else "")
+    research_data = df(research_sql, (str(start), str(end)))
+
+    # Rapport consolidé : une seule fiche pour chaque chercheur, avec toutes
+    # ses actions de valorisation réunies dans le même champ.
+    valorization_report_rows = []
+    legacy_actions_attached_by_name = set()
+    for _, profile_row in profiles.iterrows():
+        researcher_id = int(profile_row["id"])
+        action_rows = research_data[research_data["chercheur_id"] == researcher_id] if not research_data.empty else pd.DataFrame()
+        if not research_data.empty and "chercheur" in research_data.columns:
+            profile_name = " ".join(("" if pd.isna(profile_row.get(key)) else str(profile_row.get(key)).strip()) for key in ("prenom", "nom")).strip().casefold()
+            legacy_match = research_data["chercheur_id"].isna() & research_data["chercheur"].fillna("").astype(str).str.strip().str.casefold().eq(profile_name)
+            legacy_actions_attached_by_name.update(research_data.loc[legacy_match, "id"].tolist())
+            action_rows = pd.concat([action_rows, research_data[legacy_match]], ignore_index=True).drop_duplicates(subset=["id"])
+        action_lines = _communication_action_lines(action_rows, "Action de valorisation")
+        profile_fields = {f"Chercheur — {key}": value for key, value in profile_row.to_dict().items() if key not in {"id", "created_at"}}
+        valorization_report_rows.append({
+            "ID chercheur": researcher_id,
+            **profile_fields,
+            "Nombre d’actions de valorisation": len(action_lines),
+            "Actions de valorisation": "\n\n".join(action_lines) if action_lines else "Aucune action de valorisation dans la période",
+        })
+    unlinked_valorization = research_data[
+        research_data["chercheur_id"].isna() & ~research_data["id"].isin(legacy_actions_attached_by_name)
+    ] if not research_data.empty else pd.DataFrame()
+    if not unlinked_valorization.empty:
+        orphan_valorization_lines = _communication_action_lines(unlinked_valorization, "Action sans chercheur rattaché")
+        valorization_report_rows.append({
+            "ID chercheur": "",
+            "Chercheur — nom": "Actions de valorisation sans profil chercheur rattaché",
+            "Nombre d’actions de valorisation": len(orphan_valorization_lines),
+            "Actions de valorisation": "\n\n".join(orphan_valorization_lines),
+        })
+    valorization_researcher_report = pd.DataFrame(valorization_report_rows)
 
     # Registre combiné normalisé : une seule structure de colonnes pour les deux sources.
     def _normalized_resource_frame(frame, origin, mapping):
@@ -3381,6 +3451,53 @@ def render_reports():
         sort=False,
     )
 
+    # Une ligne de rapport par activité. Tous les compléments rattachés sont
+    # lisibles dans la même cellule et restent intégralement exportables.
+    linked_communications = df("SELECT * FROM communications WHERE activity_id IS NOT NULL ORDER BY id")
+    linked_media_all = df("SELECT * FROM media WHERE activity_id IS NOT NULL ORDER BY id")
+    linked_audiovisual_all = df("SELECT * FROM audiovisual WHERE activity_id IS NOT NULL ORDER BY id")
+
+    def _report_value(value):
+        if value is None or (not isinstance(value, (list, dict)) and pd.isna(value)):
+            return ""
+        return str(value).strip()
+
+    communication_report_rows = []
+    for _, activity_row in activities.iterrows():
+        activity_id = activity_row.get("id")
+        child_lines = []
+        for frame, label in [
+            (linked_communications, "Action de communication"),
+            (linked_media_all, "Presse / média"),
+            (linked_audiovisual_all, "Production audiovisuelle"),
+        ]:
+            if frame is not None and not frame.empty and "activity_id" in frame.columns:
+                child_lines.extend(_communication_action_lines(frame[frame["activity_id"] == activity_id], label))
+        activity_fields = {f"Activité — {key}": value for key, value in activity_row.to_dict().items() if key not in {"id", "created_at"}}
+        communication_report_rows.append({
+            "ID activité": activity_id,
+            **activity_fields,
+            "Nombre de compléments": len(child_lines),
+            "Actions et compléments de communication": "\n\n".join(child_lines) if child_lines else "Aucun complément rattaché",
+        })
+
+    orphan_lines = []
+    for frame, label in [
+        (communications[communications["activity_id"].isna()] if not communications.empty and "activity_id" in communications.columns else pd.DataFrame(), "Action de communication sans activité"),
+        (media_df[media_df["activity_id"].isna()] if not media_df.empty and "activity_id" in media_df.columns else pd.DataFrame(), "Presse / média sans activité"),
+        (av[av["activity_id"].isna()] if not av.empty and "activity_id" in av.columns else pd.DataFrame(), "Audiovisuel sans activité"),
+        (formats, "Format de communication"),
+    ]:
+        orphan_lines.extend(_communication_action_lines(frame, label))
+    if orphan_lines:
+        communication_report_rows.append({
+            "ID activité": "",
+            "Activité — titre": "Compléments historiques sans activité rattachée / référentiels",
+            "Nombre de compléments": len(orphan_lines),
+            "Actions et compléments de communication": "\n\n".join(orphan_lines),
+        })
+    communication_activity_report = pd.DataFrame(communication_report_rows)
+
     # Répartition explicite des résultats scientifiques par rubrique métier.
     # Les ressources documentaires sont regroupées dans le Catalogue de Documentations.
     _scientific_type = scientific.get("type_resultat", pd.Series(index=scientific.index, dtype="object")).fillna("").astype(str).str.strip().str.casefold()
@@ -3405,8 +3522,7 @@ def render_reports():
     st.subheader("📌 Indicateurs de la période")
 
     vals = [
-        ("Activités", len(activities)),
-        ("Compléments de communication — registre unique", len(communication_unifiee)),
+        ("Communication — fiches activité et compléments", len(communication_activity_report)),
         ("Catalogue documentaire", len(catalogue)),
         ("Consultations", len(consultations)),
         ("Prêts", len(loans)),
@@ -3433,12 +3549,13 @@ def render_reports():
     # RAPPORT PREMIUM COMPLET
     # ============================================================
     report_data = {
-        "Activités": activities,
-        "Communication": communications,
+        "Activités": communication_activity_report,
+        "Communication": communication_activity_report,
         "Médias": media_df,
         "Audiovisuel": av,
         "Formats": formats,
         "Compléments de communication": communication_unifiee,
+        "Compléments historiques sans rattachement": pd.DataFrame({"Actions conservées": orphan_lines}) if orphan_lines else pd.DataFrame(columns=["Actions conservées"]),
         "Catalogue": catalogue,
         "Publications scientifiques — ressources": publications_ist,
         "Consultations": consultations,
@@ -3465,7 +3582,8 @@ def render_reports():
         "Notes de synthèse": publications[publications["type_publication"] == "Note de synthèse"].copy() if not publications.empty and "type_publication" in publications.columns else pd.DataFrame(columns=publications.columns),
         "Visiteurs": visits,
         "Profils chercheurs": profiles,
-        "Valorisation chercheurs": research_data,
+        "Détail actions valorisation": research_data,
+        "Valorisation chercheurs": valorization_researcher_report,
     }
 
     # Fiche d'activité complète : informations centrales et actions associées
@@ -3483,29 +3601,18 @@ def render_reports():
         )
         activity_id = activity_options[selected_activity]
         activity_row = df("SELECT * FROM activities WHERE id=?", (activity_id,)).iloc[0].to_dict()
-        actions = df(
-            "SELECT titre AS action,type_action AS type,plateforme AS canal,structure,responsable AS qui,lien, "
-            "vues,reactions,commentaires,partages,telechargements "
-            "FROM communications WHERE activity_id=? ORDER BY id",
-            (activity_id,),
-        )
-        media_rows = df(
-            "SELECT media_name AS action,type_intervention AS type,media_type AS canal,NULL::text AS structure,journaliste AS qui,lien "
-            "FROM media WHERE activity_id=? ORDER BY id",
-            (activity_id,),
-        )
-        audiovisual_rows = df(
-            "SELECT titre AS action,type_production AS type,theme AS canal,NULL::text AS structure,responsable AS qui,lien "
-            "FROM audiovisual WHERE activity_id=? ORDER BY id",
-            (activity_id,),
-        )
+        actions = df("SELECT * FROM communications WHERE activity_id=? ORDER BY id", (activity_id,))
+        media_rows = df("SELECT * FROM media WHERE activity_id=? ORDER BY id", (activity_id,))
+        audiovisual_rows = df("SELECT * FROM audiovisual WHERE activity_id=? ORDER BY id", (activity_id,))
         actions = pd.concat([actions, media_rows, audiovisual_rows], ignore_index=True, sort=False)
         parent_columns = {f"Activité — {key}": value for key, value in activity_row.items() if key not in ("id", "created_at")}
-        child_rows = actions.to_dict(orient="records") if not actions.empty else [{"action": "Aucune action enregistrée"}]
-        activity_report = pd.DataFrame([
-            {**parent_columns, **{f"Action — {key}": value for key, value in action.items()}}
-            for action in child_rows
-        ])
+        activity_lines = _communication_action_lines(actions, "Communication / média / audiovisuel")
+        activity_report = pd.DataFrame([{
+            "ID activité": activity_id,
+            **parent_columns,
+            "Nombre de compléments": len(activity_lines),
+            "Actions et compléments de communication": "\n\n".join(activity_lines) if activity_lines else "Aucun complément enregistré",
+        }])
         export_buttons(
             activity_report, f"rapport_unique_activite_{activity_id}",
             f"Fiche complète — {selected_activity}"
@@ -3534,7 +3641,8 @@ def render_reports():
     # disponibles dans report_data pour les calculs et le PDF, mais ne sont pas dupliqués
     # en feuilles séparées lorsque leur contenu est déjà rassemblé dans un registre unique.
     _legacy_separate_sheets = {
-        "Communication", "Médias", "Audiovisuel", "Formats",
+        "Communication", "Médias", "Audiovisuel", "Formats", "Compléments de communication",
+        "Compléments historiques sans rattachement", "Profils chercheurs", "Détail actions valorisation",
         "Publications scientifiques — ressources",
         "Résultats scientifiques", "Résultats scientifiques — regroupés",
     }
@@ -3573,14 +3681,8 @@ def render_reports():
     st.markdown("### 👁️ Aperçu du rapport")
 
     with st.expander("📣 02 — Communication — activités et Compléments de communication", expanded=True):
-        st.markdown("**🗓️ Activités enregistrées — centre de Communication**")
-        st.dataframe(
-            activities,
-            use_container_width=True,
-            hide_index=True,
-        )
-        st.markdown("**📚 Compléments de communication — registre unique (actions, médias, audiovisuel et formats)**")
-        st.dataframe(report_data["Compléments de communication"], use_container_width=True, hide_index=True)
+        st.markdown("**Une ligne par activité : activité et ensemble des compléments dans une seule fiche**")
+        st.dataframe(report_data["Activités"], use_container_width=True, hide_index=True)
 
     with st.expander("📚 03 — Documentations"):
         st.markdown("**📚 Catalogue documentaire unifié — fonds bibliothèque et ressources documentaires / IST**")
@@ -3619,16 +3721,8 @@ def render_reports():
         )
 
     with st.expander("🧬 06 — Valorisation chercheurs"):
-        st.dataframe(
-            profiles,
-            use_container_width=True,
-            hide_index=True,
-        )
-        st.dataframe(
-            research_data,
-            use_container_width=True,
-            hide_index=True,
-        )
+        st.markdown("**Une ligne par chercheur : profil et actions de valorisation réunis sur la même fiche**")
+        st.dataframe(valorization_researcher_report, use_container_width=True, hide_index=True)
 
 
 # -----------------------------
