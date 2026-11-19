@@ -3410,23 +3410,90 @@ def render_reports():
         _normalized_communication_frame(communications, "Action de communication", {
             "categorie":"categorie", "titre":"titre", "type":"type_action", "date":"date_publication",
             "canal":"plateforme", "responsable":"", "lien":"lien", "observations":"observations"}),
-            "canal":"plateforme", "structure":"structure", "responsable":"responsable",
-            "vues":"vues", "reactions":"reactions", "commentaires":"commentaires", "partages":"partages",
-            "telechargements":"telechargements", "lien":"lien", "observations":"observations"}),
         _normalized_communication_frame(media_df, "Presse et médias", {
             "categorie":"media_type", "titre":"media_name", "type":"type_intervention", "date":"date_intervention",
             "canal":"sujet", "responsable":"journaliste", "lien":"lien", "observations":"observations"}),
-            "canal":"sujet", "structure":"", "responsable":"journaliste", "vues":"", "reactions":"",
-            "commentaires":"", "partages":"", "telechargements":"", "lien":"lien", "observations":"observations"}),
         _normalized_communication_frame(av, "Production audiovisuelle", {
             "categorie":"type_production", "titre":"titre", "type":"type_production", "date":"date_production",
             "canal":"theme", "responsable":"responsable", "lien":"lien", "observations":"observations"}),
-            "canal":"theme", "structure":"", "responsable":"responsable", "vues":"", "reactions":"",
-            "commentaires":"", "partages":"", "telechargements":"", "lien":"lien", "observations":"observations"}),
         _normalized_communication_frame(formats, "Format de communication", {
             "categorie":"categorie", "titre":"nom_format", "type":"categorie", "date":"", "canal":"norme",
             "responsable":"", "lien":"lien_reference", "observations":"observations"}),
     ], ignore_index=True, sort=False)
+    communication_mapping = {
+        "categorie": "categorie",
+        "titre": "titre",
+        "type": "type_action",
+        "date": "date_publication",
+        "canal": "plateforme",
+        "structure": "structure",
+        "responsable": "responsable",
+        "vues": "vues",
+        "reactions": "reactions",
+        "commentaires": "commentaires",
+        "partages": "partages",
+        "telechargements": "telechargements",
+        "lien": "lien",
+        "observations": "observations",
+    }
+    media_mapping = {
+        "categorie": "media_type",
+        "titre": "media_name",
+        "type": "type_intervention",
+        "date": "date_intervention",
+        "canal": "sujet",
+        "structure": "",
+        "responsable": "journaliste",
+        "vues": "",
+        "reactions": "",
+        "commentaires": "",
+        "partages": "",
+        "telechargements": "",
+        "lien": "lien",
+        "observations": "observations",
+    }
+    audiovisual_mapping = {
+        "categorie": "type_production",
+        "titre": "titre",
+        "type": "type_production",
+        "date": "date_production",
+        "canal": "theme",
+        "structure": "",
+        "responsable": "responsable",
+        "vues": "",
+        "reactions": "",
+        "commentaires": "",
+        "partages": "",
+        "telechargements": "",
+        "lien": "lien",
+        "observations": "observations",
+    }
+    formats_mapping = {
+        "categorie": "categorie",
+        "titre": "nom_format",
+        "type": "categorie",
+        "date": "",
+        "canal": "norme",
+        "structure": "",
+        "responsable": "",
+        "vues": "",
+        "reactions": "",
+        "commentaires": "",
+        "partages": "",
+        "telechargements": "",
+        "lien": "lien_reference",
+        "observations": "observations",
+    }
+    communication_unifiee = pd.concat(
+        [
+            _normalized_communication_frame(communications, "Action de communication", communication_mapping),
+            _normalized_communication_frame(media_df, "Presse et médias", media_mapping),
+            _normalized_communication_frame(av, "Production audiovisuelle", audiovisual_mapping),
+            _normalized_communication_frame(formats, "Format de communication", formats_mapping),
+        ],
+        ignore_index=True,
+        sort=False,
+    )
 
     # Répartition explicite des résultats scientifiques par rubrique métier.
     # Les ressources documentaires sont regroupées dans le Catalogue de Documentations.
@@ -3782,3 +3849,11 @@ elif page == "📊 Rapports & exports":
     render_reports()
 
 st.caption("ISRA • CRA — IST et Communication | Organisation : Communication • Documentations (Catalogue documentaire unifié, Consultations, Personnes, Prêts et retours) • Résultats scientifiques (publications et notes) | Formats : PDF • Excel • CSV")
+
+
+
+
+
+
+
+
