@@ -606,8 +606,22 @@ def init_db():
         ALTER TABLE audiovisual ADD COLUMN IF NOT EXISTS activity_id BIGINT REFERENCES activities(id) ON DELETE SET NULL;
         ALTER TABLE communications ADD COLUMN IF NOT EXISTS structure TEXT;
         ALTER TABLE communications ADD COLUMN IF NOT EXISTS responsable TEXT;
+        ALTER TABLE people ADD COLUMN IF NOT EXISTS fonction TEXT;
+        ALTER TABLE people ADD COLUMN IF NOT EXISTS structure TEXT;
+        ALTER TABLE people ADD COLUMN IF NOT EXISTS telephone TEXT;
+        ALTER TABLE people ADD COLUMN IF NOT EXISTS email TEXT;
+        ALTER TABLE people ADD COLUMN IF NOT EXISTS localite TEXT;
+        ALTER TABLE people ADD COLUMN IF NOT EXISTS region TEXT;
         ALTER TABLE researcher_profiles ADD COLUMN IF NOT EXISTS photo TEXT;
         ALTER TABLE researcher_profiles ADD COLUMN IF NOT EXISTS cv_fichier TEXT;
+        ALTER TABLE researcher_valorization ADD COLUMN IF NOT EXISTS titre TEXT;
+        ALTER TABLE researcher_valorization ADD COLUMN IF NOT EXISTS auteurs TEXT;
+        ALTER TABLE researcher_valorization ADD COLUMN IF NOT EXISTS annee INTEGER;
+        ALTER TABLE researcher_valorization ADD COLUMN IF NOT EXISTS type_document TEXT;
+        ALTER TABLE researcher_valorization ADD COLUMN IF NOT EXISTS mots_cles TEXT;
+        ALTER TABLE researcher_valorization ADD COLUMN IF NOT EXISTS etat TEXT;
+        ALTER TABLE researcher_valorization ADD COLUMN IF NOT EXISTS format_document TEXT;
+        ALTER TABLE researcher_valorization ADD COLUMN IF NOT EXISTS resume TEXT;
         UPDATE activities SET date_fin = date_activite WHERE date_fin IS NULL AND date_activite IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_activities_date ON activities(date_activite);
         CREATE INDEX IF NOT EXISTS idx_documents_year ON documents(annee);
@@ -2257,6 +2271,25 @@ def render_dashboard():
         with cols[i % 4]:
             st.markdown(f'<div class="metric"><div class="label">{label}</div><div class="value">{value}</div></div>', unsafe_allow_html=True)
 
+    st.markdown("### 🧬 Derniers documents de valorisation des chercheurs")
+    recent_valorization = df("""
+        SELECT rv.titre, rv.auteurs, rv.annee,
+               COALESCE(NULLIF(rv.type_document,''), rv.type_valorisation) AS type,
+               STRING_AGG(TRIM(COALESCE(rp.prenom,'') || ' ' || rp.nom), ', ' ORDER BY rp.nom) AS chercheurs,
+               rv.etat, rv.format_document, rv.lien
+        FROM researcher_valorization rv
+        LEFT JOIN researcher_valorization_researchers rvr ON rvr.valorization_id=rv.id
+        LEFT JOIN researcher_profiles rp ON rp.id=rvr.researcher_id
+        GROUP BY rv.id
+        ORDER BY rv.annee DESC NULLS LAST, rv.id DESC
+        LIMIT 8
+    """)
+    if recent_valorization.empty:
+        st.info("Aucun document de valorisation n’est encore enregistré.")
+    else:
+        st.dataframe(recent_valorization, use_container_width=True, hide_index=True,
+                     column_config={"lien": st.column_config.LinkColumn("Document", display_text="Ouvrir ↗")})
+
     st.markdown("### 📈 Activités par mois")
     act = df("""
         SELECT TO_CHAR(date_activite, 'YYYY-MM') AS mois, COUNT(*) AS nombre
@@ -2609,7 +2642,12 @@ def render_documentations():
                     consultation_date=c1.date_input("Date",date.today(),key=f"doc_consult_date_{n}")
                     person=c2.selectbox("Personne déjà enregistrée",["—"]+list(person_options),key=f"doc_consult_person_{n}")
                     visitor_name=c3.text_input("Nom si nouvelle personne",key=f"doc_consult_name_{n}")
-                    consultation_values.append({"date":consultation_date,"person":person,"name":visitor_name})
+                    c1,c2,c3,c4=st.columns(4)
+                    person_function=c1.text_input("Fonction / poste",key=f"doc_consult_function_{n}")
+                    person_email=c2.text_input("E-mail",key=f"doc_consult_email_{n}")
+                    person_phone=c3.text_input("Téléphone",key=f"doc_consult_phone_{n}")
+                    person_origin=c4.text_input("Lieu d’origine",key=f"doc_consult_origin_{n}")
+                    consultation_values.append({"date":consultation_date,"person":person,"name":visitor_name,"function":person_function,"email":person_email,"phone":person_phone,"origin":person_origin})
         loan_values=[]
         if loan_count:
             st.markdown("### 3. Détails des prêts")
@@ -2622,7 +2660,12 @@ def render_documentations():
                     due_date=c2.date_input("Retour prévu",date.today()+timedelta(days=14),key=f"doc_loan_due_{n}")
                     person=c3.selectbox("Personne déjà enregistrée",["—"]+list(person_options),key=f"doc_loan_person_{n}")
                     borrower=st.text_input("Nom si nouvel emprunteur",key=f"doc_loan_name_{n}")
-                    loan_values.append({"date":loan_date,"due":due_date,"person":person,"name":borrower})
+                    c1,c2,c3,c4=st.columns(4)
+                    person_function=c1.text_input("Fonction / poste",key=f"doc_loan_function_{n}")
+                    person_email=c2.text_input("E-mail",key=f"doc_loan_email_{n}")
+                    person_phone=c3.text_input("Téléphone",key=f"doc_loan_phone_{n}")
+                    person_origin=c4.text_input("Lieu d’origine",key=f"doc_loan_origin_{n}")
+                    loan_values.append({"date":loan_date,"due":due_date,"person":person,"name":borrower,"function":person_function,"email":person_email,"phone":person_phone,"origin":person_origin})
         save=st.form_submit_button("💾 Enregistrer le document et tous ses suivis",type="primary",use_container_width=True)
     if save:
         invalid_due=any(row["due"]<row["date"] for row in loan_values)
@@ -2636,15 +2679,13 @@ def render_documentations():
                 person_id=person_options.get(row["person"])
                 if row["name"].strip():
                     parts=row["name"].strip().split(" ",1)
-                    q("INSERT INTO people(nom,prenom) VALUES(?,?)",(parts[0],parts[1] if len(parts)>1 else ""))
-                    person_id=q("SELECT id FROM people WHERE nom=? AND COALESCE(prenom,'')=? ORDER BY id DESC LIMIT 1",(parts[0],parts[1] if len(parts)>1 else ""),fetch=True)[0]["id"]
+                    person_id=q("INSERT INTO people(nom,prenom,fonction,email,telephone,localite) VALUES(?,?,?,?,?,?) RETURNING id",(parts[0],parts[1] if len(parts)>1 else "",row["function"],row["email"],row["phone"],row["origin"]))
                 q("INSERT INTO consultations(person_id,item_id,date_consultation,type_consultation,observations) VALUES(?,?,?,?,?)",(person_id,item_id,str(row["date"]),"Sur place",""))
             for row in loan_values:
                 person_id=person_options.get(row["person"])
                 if row["name"].strip():
                     parts=row["name"].strip().split(" ",1)
-                    q("INSERT INTO people(nom,prenom) VALUES(?,?)",(parts[0],parts[1] if len(parts)>1 else ""))
-                    person_id=q("SELECT id FROM people WHERE nom=? AND COALESCE(prenom,'')=? ORDER BY id DESC LIMIT 1",(parts[0],parts[1] if len(parts)>1 else ""),fetch=True)[0]["id"]
+                    person_id=q("INSERT INTO people(nom,prenom,fonction,email,telephone,localite) VALUES(?,?,?,?,?,?) RETURNING id",(parts[0],parts[1] if len(parts)>1 else "",row["function"],row["email"],row["phone"],row["origin"]))
                 q("INSERT INTO loans(person_id,item_id,date_emprunt,date_retour_prevue,statut,observations) VALUES(?,?,?,?,?,?)",(person_id,item_id,str(row["date"]),str(row["due"]),"En cours",""))
             if loan_values: q("UPDATE library_items SET disponibles=GREATEST(COALESCE(disponibles,0)-?,0) WHERE id=?",(len(loan_values),item_id))
             st.success(f"La fiche « {titre} » et ses {len(consultation_values)} consultation(s) / {len(loan_values)} prêt(s) ont été enregistrés ensemble.")
@@ -2660,10 +2701,16 @@ def render_documentations():
     item_id=choices[selected]
     item=df("SELECT * FROM library_items WHERE id=?",(item_id,)).iloc[0].to_dict()
     operations=df("""
-        SELECT 'Consultation' AS operation,c.date_consultation::text AS date,COALESCE(TRIM(COALESCE(p.prenom,'')||' '||COALESCE(p.nom,'')),'Personne non précisée') AS personne,c.observations
+        SELECT 'Consultation' AS operation,c.date_consultation::text AS date,
+               COALESCE(TRIM(COALESCE(p.prenom,'')||' '||COALESCE(p.nom,'')),'Personne non précisée') AS personne,
+               COALESCE(p.fonction,'') AS fonction,COALESCE(p.email,'') AS email,
+               COALESCE(p.telephone,'') AS telephone,COALESCE(p.localite,'') AS lieu_origine,c.observations
         FROM consultations c LEFT JOIN people p ON p.id=c.person_id WHERE c.item_id=?
         UNION ALL
-        SELECT 'Prêt',l.date_emprunt::text,COALESCE(TRIM(COALESCE(p.prenom,'')||' '||COALESCE(p.nom,'')),'Personne non précisée'),COALESCE(l.statut,'')||' — retour prévu '||l.date_retour_prevue::text||' — '||COALESCE(l.observations,'')
+        SELECT 'Prêt',l.date_emprunt::text,
+               COALESCE(TRIM(COALESCE(p.prenom,'')||' '||COALESCE(p.nom,'')),'Personne non précisée'),
+               COALESCE(p.fonction,''),COALESCE(p.email,''),COALESCE(p.telephone,''),COALESCE(p.localite,''),
+               COALESCE(l.statut,'')||' — retour prévu '||l.date_retour_prevue::text||' — '||COALESCE(l.observations,'')
         FROM loans l LEFT JOIN people p ON p.id=l.person_id WHERE l.item_id=?
         ORDER BY date DESC
     """,(item_id,item_id))
@@ -2724,61 +2771,83 @@ def render_visitors():
         c2.metric("Visiteurs / structures renseignés",visits["structure"].notna().sum() if "structure" in visits.columns else 0)
 
 def render_researchers():
-    """Une fiche unique pour le chercheur et le nombre choisi d’actions de valorisation."""
+    """Fiche chercheur avec une ou plusieurs fiches documentaires de valorisation."""
     st.header("🧬 Valorisation des chercheurs")
-    st.caption("Renseignez le profil du chercheur, indiquez le nombre de ses actions, puis complétez chaque action avant d’enregistrer une seule fiche.")
-    st.markdown('<div class="section-banner"><span>UNE SEULE FICHE</span><strong>Profil du chercheur + toutes ses actions</strong></div>',unsafe_allow_html=True)
-    action_count=st.number_input("Combien d’actions de valorisation ajouter à cette fiche ?",min_value=0,value=0,step=1,key="researcher_action_count")
-    with st.form("researcher_complete_form"):
-        st.markdown("### 1. Informations sur le chercheur")
+    st.caption("Créez le profil du chercheur puis ajoutez, dans la même saisie, les documents qui valorisent ses travaux.")
+    st.markdown('<div class="section-banner"><span>VALORISATION CHERCHEUR</span><strong>Profil + documents valorisés</strong></div>',unsafe_allow_html=True)
+    action_count=st.number_input("Nombre de documents de valorisation à ajouter",min_value=0,value=0,step=1,key="researcher_document_count")
+    with st.form("researcher_documents_complete_form"):
+        st.markdown("### Profil du chercheur")
         c1,c2,c3=st.columns(3)
         nom=c1.text_input("Nom *"); prenom=c2.text_input("Prénom"); fonction=c3.text_input("Grade / fonction")
         c1,c2,c3=st.columns(3)
-        unite=c1.text_input("Unité / laboratoire"); domaine=c2.text_input("Domaine d’expertise"); mots=c3.text_input("Mots-clés")
+        unite=c1.text_input("Unité / laboratoire"); expertise=c2.text_input("Domaine d’expertise"); profile_keywords=c3.text_input("Mots-clés du chercheur")
         c1,c2,c3=st.columns(3)
         email=c1.text_input("E-mail"); telephone=c2.text_input("Téléphone"); orcid=c3.text_input("ORCID")
         bio=st.text_area("Biographie courte")
         profil=st.text_area("Profil scientifique complet")
-        photo=drive_link_input("Photo / portrait",key="researcher_complete_photo")
-        cv=drive_link_input("CV / dossier professionnel",key="researcher_complete_cv")
-        profile_link=drive_link_input("Page institutionnelle / ORCID",key="researcher_complete_profile_link")
-        observations=st.text_area("Observations sur le profil")
+        photo=drive_link_input("Photo / portrait",key="valorization_profile_photo")
+        cv=drive_link_input("CV / dossier professionnel",key="valorization_profile_cv")
+        profile_link=drive_link_input("Page institutionnelle / ORCID",key="valorization_profile_link")
+        profile_notes=st.text_area("Observations sur le profil")
         actions=[]
         if action_count:
-            st.markdown("### 2. Actions de valorisation")
+            st.markdown("### Documents de valorisation")
             for i in range(int(action_count)):
                 n=i+1
                 with st.container(border=True):
-                    st.markdown(f"#### Action de valorisation {n}")
-                    kind=st.selectbox("Qu’a fait le chercheur ?",["Article","Interview","Portrait","Vidéo","Publication","Communication scientifique","Conférence","Démonstration","Autre"],key=f"research_action_type_{n}")
-                    support=st.text_input("Support / structure",key=f"research_action_support_{n}")
-                    link=drive_link_input("Lien web / photo / vidéo / document",key=f"research_action_link_{n}")
-                    actions.append({"type":kind,"support":support,"link":link})
-        save=st.form_submit_button("💾 Enregistrer le profil et toutes ses actions",type="primary",use_container_width=True)
+                    st.markdown(f"#### Document {n}")
+                    c1,c2,c3=st.columns(3)
+                    title=c1.text_input("Titre du document *",key=f"valorization_title_{n}")
+                    authors=c2.text_input("Auteur(s)",key=f"valorization_authors_{n}")
+                    year=c3.number_input("Année",1900,2100,value=date.today().year,key=f"valorization_year_{n}")
+                    c1,c2,c3=st.columns(3)
+                    doc_type=c1.selectbox("Type",["Article scientifique","Ouvrage","Chapitre d’ouvrage","Communication scientifique","Actes de conférence","Rapport","Mémoire","Thèse","Fiche technique","Document technique","Note politique","Note de synthèse","Autre"],key=f"valorization_doctype_{n}")
+                    domain=c2.text_input("Domaine",key=f"valorization_domain_{n}")
+                    theme=c3.text_input("Thématique",key=f"valorization_theme_{n}")
+                    keywords=st.text_input("Mots-clés",key=f"valorization_keywords_{n}")
+                    c1,c2=st.columns(2)
+                    state=c1.selectbox("État",["Disponible","En préparation","À vérifier","Archivé"],key=f"valorization_state_{n}")
+                    doc_format=c2.selectbox("Format",["Papier","Numérique","Papier + numérique","Autre"],key=f"valorization_format_{n}")
+                    summary=st.text_area("Résumé / description",key=f"valorization_summary_{n}")
+                    link=drive_link_input("Lien du document / Google Drive",key=f"valorization_document_link_{n}")
+                    notes=st.text_area("Observations sur le document",key=f"valorization_notes_{n}")
+                    actions.append({"title":title,"authors":authors,"year":year,"type":doc_type,"domain":domain,"theme":theme,"keywords":keywords,"state":state,"format":doc_format,"summary":summary,"link":link,"notes":notes})
+        save=st.form_submit_button("💾 Enregistrer le profil et ses documents",type="primary",use_container_width=True)
     if save:
-        if not nom.strip(): st.error("Le nom du chercheur est obligatoire.")
+        if not nom.strip():
+            st.error("Le nom du chercheur est obligatoire.")
+        elif any(not action["title"].strip() for action in actions):
+            st.error("Renseignez le titre de chaque document de valorisation.")
         else:
-            researcher_id=q("INSERT INTO researcher_profiles(nom,prenom,grade_fonction,unite_laboratoire,domaine_expertise,mots_cles,biographie,profil_complet,email,telephone,ORCID,photo,cv_fichier,lien_profil,observations) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id",(nom.strip(),prenom,fonction,unite,domaine,mots,bio,profil,email,telephone,orcid,photo,cv,profile_link,observations))
+            researcher_id=q("INSERT INTO researcher_profiles(nom,prenom,grade_fonction,unite_laboratoire,domaine_expertise,mots_cles,biographie,profil_complet,email,telephone,ORCID,photo,cv_fichier,lien_profil,observations) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id",(nom.strip(),prenom,fonction,unite,expertise,profile_keywords,bio,profil,email,telephone,orcid,photo,cv,profile_link,profile_notes))
             for action in actions:
-                valorization_id=q("INSERT INTO researcher_valorization(date_action,type_valorisation,support,lien) VALUES(?,?,?,?) RETURNING id",(str(date.today()),action["type"],action["support"],action["link"]))
+                valorization_id=q("""INSERT INTO researcher_valorization(titre,auteurs,annee,type_document,domaine,thematique,mots_cles,etat,format_document,resume,date_action,type_valorisation,support,lien,observations)
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id""",(action["title"].strip(),action["authors"],action["year"],action["type"],action["domain"],action["theme"],action["keywords"],action["state"],action["format"],action["summary"],str(date.today()),action["type"],action["format"],action["link"],action["notes"]))
                 q("INSERT INTO researcher_valorization_researchers(valorization_id,researcher_id) VALUES(?,?) ON CONFLICT DO NOTHING",(valorization_id,researcher_id))
-            st.success(f"La fiche de {nom} et ses {len(actions)} action(s) ont été enregistrées ensemble.")
+            st.success(f"Fiche de {nom} enregistrée avec {len(actions)} document(s) de valorisation.")
             st.rerun()
-    st.markdown("### Fiches chercheurs enregistrées")
+
+    st.markdown("### Chercheurs enregistrés")
     profiles=df("SELECT id,nom,prenom,grade_fonction,unite_laboratoire,domaine_expertise,email,ORCID FROM researcher_profiles ORDER BY id DESC")
     if profiles.empty:
-        st.info("Aucune fiche chercheur enregistrée.")
+        st.info("Aucun profil chercheur enregistré.")
         return
     st.dataframe(profiles,use_container_width=True,hide_index=True)
     options={f"{r.nom} {r.prenom or ''} — ID {r.id}":int(r.id) for r in profiles.itertuples()}
-    chosen=st.selectbox("Ouvrir le rapport d’une fiche",list(options),key="researcher_complete_report_selector")
+    chosen=st.selectbox("Consulter la fiche et ses documents",list(options),key="researcher_documents_report_selector")
     researcher_id=options[chosen]
     profile=df("SELECT * FROM researcher_profiles WHERE id=?",(researcher_id,))
-    actions=df("SELECT rv.date_action,rv.domaine,rv.thematique,rv.projet,rv.type_valorisation,rv.support,rv.lien,rv.observations FROM researcher_valorization rv JOIN researcher_valorization_researchers rvr ON rvr.valorization_id=rv.id WHERE rvr.researcher_id=? ORDER BY rv.date_action,rv.id",(researcher_id,))
+    actions=df("""SELECT rv.titre,rv.auteurs,rv.annee,rv.type_document,rv.domaine,rv.thematique,rv.mots_cles,rv.etat,rv.format_document,rv.resume,rv.lien,rv.observations,rv.date_action,rv.type_valorisation,rv.support
+        FROM researcher_valorization rv JOIN researcher_valorization_researchers rvr ON rvr.valorization_id=rv.id
+        WHERE rvr.researcher_id=? ORDER BY rv.annee DESC NULLS LAST,rv.id DESC""",(researcher_id,))
+    st.markdown(f"#### Documents rattachés ({len(actions)})")
+    if actions.empty: st.info("Aucun document de valorisation n’est encore rattaché à ce profil.")
+    else: st.dataframe(actions,use_container_width=True,hide_index=True,column_config={"lien":st.column_config.LinkColumn("Lien du document",display_text="Ouvrir ↗")})
     parent={f"Profil — {k}":v for k,v in profile.iloc[0].to_dict().items() if k not in ("id","created_at")} if not profile.empty else {}
-    rows=actions.to_dict(orient="records") if not actions.empty else [{"Action":"Aucune action de valorisation"}]
-    report=pd.DataFrame([{**parent,**{f"Action — {k}":v for k,v in row.items()}} for row in rows])
-    export_buttons(report,f"fiche_complete_chercheur_{researcher_id}",f"Fiche complète chercheur — {chosen}")
+    children=actions.to_dict(orient="records") if not actions.empty else [{"titre":"Aucun document de valorisation"}]
+    report=pd.DataFrame([{**parent,**{f"Document — {k}":v for k,v in row.items()}} for row in children])
+    export_buttons(report,f"fiche_valorisation_chercheur_{researcher_id}",f"Fiche de valorisation — {chosen}")
 
 
 def render_profile():
@@ -2802,43 +2871,149 @@ def render_profile():
     # -----------------------------
 
 def render_scientific_results():
-    """Un formulaire transversal et une fiche complète pour chaque résultat scientifique."""
+    """Espace Résultats scientifiques organisé en six onglets métier."""
     st.header("🔬 Résultats scientifiques")
-    st.caption("Fiches techniques, mémoires, thèses, rapports, publications et notes sont saisis depuis le même formulaire et consultés dans un seul registre.")
-    st.markdown('<div class="section-banner"><span>FICHE SCIENTIFIQUE</span><strong>Résultats • Publications • Notes</strong></div>',unsafe_allow_html=True)
-    with st.form("scientific_master_form"):
-        kind=st.selectbox("Type de fiche",["Fiche technique","Mémoire","Thèse","Rapport","Publication scientifique","Note politique","Note de synthèse"])
-        c1,c2,c3=st.columns(3)
-        titre=c1.text_input("Titre *"); auteurs=c2.text_input("Auteur(s)"); annee=c3.number_input("Année",1900,2100,value=date.today().year)
-        c1,c2,c3=st.columns(3)
-        domaine=c1.text_input("Domaine / thématique"); projet=c2.text_input("Projet"); public_cible=c3.text_input("Public cible")
-        resume=st.text_area("Résumé")
-        c1,c2,c3=st.columns(3)
-        mots=c1.text_input("Mots-clés"); reference=c2.text_input("Référence / DOI"); statut=c3.selectbox("Statut",["Disponible","À vérifier","En préparation","Archivé"])
-        lien=drive_link_input("Lien web / DOI / document",key="scientific_master_link")
-        observations=st.text_area("Observations")
-        save=st.form_submit_button("💾 Enregistrer la fiche scientifique",type="primary")
-    if save:
-        if not titre.strip(): st.error("Le titre est obligatoire.")
-        else:
-            values=(kind,titre,auteurs,annee,domaine,projet,resume,mots,public_cible,reference,None,lien,statut,observations)
-            if kind in ["Fiche technique","Mémoire","Thèse","Rapport"]:
-                q("INSERT INTO scientific_results(type_resultat,titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,fichier,lien,statut,observations) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",values)
+    st.caption(
+        "Un espace unique pour les fiches techniques, mémoires, thèses, rapports, "
+        "publications scientifiques, notes politiques et notes de synthèse. "
+        "Privilégiez les liens web, DOI et liens institutionnels : aucun fichier n'est téléversé."
+    )
+    st.markdown(
+        '<div class="section-banner"><span>RÉSULTATS SCIENTIFIQUES</span>'
+        '<strong>Documents • Publications & IST • Notes politiques • Notes de synthèse</strong></div>',
+        unsafe_allow_html=True,
+    )
+
+    # Les ressources IST sont désormais regroupées avec les autres références dans le Catalogue documentaire.
+    tab_fiche, tab_memoire, tab_these, tab_rapport, tab_publications_ist, tab_note_politique, tab_note_synthese = st.tabs([
+        "🧾 Fiches techniques", "📘 Mémoires", "🎓 Thèses", "📑 Rapports",
+        "📰 Publications scientifiques", "🗒️ Notes politiques", "📋 Notes de synthèse"
+    ])
+
+    def render_result_form(label):
+        with st.form(f"scientific_{label.replace(' ','_')}"):
+            c1,c2,c3=st.columns(3)
+            titre=c1.text_input("Titre *", key=f"sci_titre_{label}")
+            auteurs=c2.text_input("Auteur(s)", key=f"sci_auteurs_{label}")
+            annee=c3.number_input("Année",1900,2100,value=date.today().year,key=f"sci_annee_{label}")
+            c1,c2,c3=st.columns(3)
+            domaine=c1.text_input("Domaine",key=f"sci_domaine_{label}")
+            projet=c2.text_input("Projet",key=f"sci_projet_{label}")
+            public_cible=c3.text_input("Public cible",key=f"sci_public_{label}")
+            resume=st.text_area("Résumé",key=f"sci_resume_{label}")
+            c1,c2,c3=st.columns(3)
+            mots=c1.text_input("Mots-clés",key=f"sci_mots_{label}")
+            reference=c2.text_input("Référence / DOI",key=f"sci_ref_{label}")
+            lien=drive_link_input("Lien web / document Drive",key=f"sci_lien_{label}")
+            statut=st.selectbox("Statut",["Disponible","En préparation","Archivé"],key=f"sci_statut_{label}")
+            observations=st.text_area("Observations",key=f"sci_obs_{label}")
+            ok=st.form_submit_button("💾 Enregistrer",type="primary")
+        if ok:
+            if not titre.strip():
+                st.error("Le titre est obligatoire.")
             else:
-                q("INSERT INTO scientific_publications(type_publication,titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,fichier,lien,statut,observations) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",values)
-            st.success("Fiche scientifique enregistrée."); st.rerun()
-    science=df("SELECT id,type_resultat AS type,titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,lien,statut,observations,'Résultat' AS origine FROM scientific_results UNION ALL SELECT id,type_publication,titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,lien,statut,observations,'Publication' FROM scientific_publications ORDER BY annee DESC NULLS LAST,titre")
-    st.markdown(f"### Registre scientifique unique ({len(science)})")
-    if science.empty:
-        st.info("Aucune fiche scientifique enregistrée.")
-        return
-    st.dataframe(science.drop(columns=["id","origine"],errors="ignore"),use_container_width=True,hide_index=True,column_config={"lien":st.column_config.LinkColumn("Lien / DOI",display_text="Ouvrir ↗")})
-    choices={f"{r.type} — {r.titre} ({r.annee or 'année non précisée'}) — {r.origine} ID {r.id}":(str(r.origine),int(r.id)) for r in science.itertuples()}
-    chosen=st.selectbox("Ouvrir une fiche pour l’export",list(choices),key="science_master_report_selector")
-    origin,rid=choices[chosen]
-    if origin=="Résultat": selected=df("SELECT type_resultat AS type,titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,lien,statut,observations FROM scientific_results WHERE id=?",(rid,))
-    else: selected=df("SELECT type_publication AS type,titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,lien,statut,observations FROM scientific_publications WHERE id=?",(rid,))
-    export_buttons(selected,f"fiche_scientifique_{origin.lower()}_{rid}",f"Fiche scientifique — {chosen}")
+                q("""INSERT INTO scientific_results(type_resultat,titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,fichier,lien,statut,observations)
+                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                  (label,titre,auteurs,annee,domaine,projet,resume,mots,public_cible,reference,None,lien,statut,observations))
+                st.success(f"{label} enregistré."); st.rerun()
+        data=df("SELECT id,type_resultat,titre,auteurs,annee,domaine,projet,reference,statut,lien FROM scientific_results WHERE type_resultat=? ORDER BY annee DESC,id DESC",(label,))
+        st.dataframe(data,use_container_width=True,hide_index=True)
+        export_buttons(data,f"{label.lower().replace(' ','_')}",label)
+
+    with tab_fiche:
+        st.subheader("🧾 Fiches techniques")
+        render_result_form("Fiche technique")
+    with tab_memoire:
+        st.subheader("📘 Mémoires")
+        render_result_form("Mémoire")
+    with tab_these:
+        st.subheader("🎓 Thèses")
+        render_result_form("Thèse")
+    with tab_rapport:
+        st.subheader("📑 Rapports scientifiques")
+        render_result_form("Rapport")
+
+    with tab_publications_ist:
+        st.subheader("📰 Publications scientifiques")
+        st.caption("Les publications scientifiques de recherche restent gérées ici. Les ressources de référence et de documentation générale sont regroupées dans le Catalogue documentaire.")
+        with st.form("publications_ist_contenu_unique_form"):
+            origine="Publication scientifique"
+            c1,c2,c3=st.columns(3)
+            titre=c1.text_input("Titre *",key="pubist_titre")
+            auteurs=c2.text_input("Auteur(s)",key="pubist_auteurs")
+            annee=c3.number_input("Année",1900,2100,value=date.today().year,key="pubist_annee")
+            c1,c2,c3=st.columns(3)
+            type_ressource=c1.selectbox("Type de document",["Article scientifique","Ouvrage","Chapitre d’ouvrage","Communication scientifique","Actes de conférence","Rapport","Mémoire","Thèse","Document technique","Guide","Brochure","Plaquette","Revue / bulletin","Autre"],key="pubist_type")
+            domaine=c2.text_input("Domaine / thématique",key="pubist_domaine")
+            projet=c3.text_input("Projet associé",key="pubist_projet")
+            c1,c2,c3=st.columns(3)
+            mots=c1.text_input("Mots-clés",key="pubist_mots")
+            public_cible=c2.text_input("Public cible / chercheur associé",key="pubist_public")
+            langue=c3.text_input("Langue",value="Français",key="pubist_langue")
+            resume=st.text_area("Résumé",key="pubist_resume")
+            c1,c2,c3=st.columns(3)
+            reference=c1.text_input("Référence bibliographique / DOI",key="pubist_reference")
+            pages=c2.number_input("Pages (si applicable)",0,step=1,key="pubist_pages")
+            statut=c3.selectbox("Statut",["Disponible","À vérifier","En préparation","Archivé"],key="pubist_statut")
+            lien=drive_link_input("🔗 Lien web / DOI / document Drive",key="pubist_lien")
+            observations=st.text_area("Observations",key="pubist_observations")
+            ok=st.form_submit_button("💾 Enregistrer dans le registre scientifique & IST",type="primary")
+        if ok:
+            if not titre.strip():
+                st.error("Le titre est obligatoire.")
+            else:
+                try:
+                    q("""INSERT INTO scientific_publications(type_publication,titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,fichier,lien,statut,observations)
+                         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",(type_ressource,titre,auteurs,annee,domaine,projet,resume,mots,public_cible,reference,None,lien,statut,observations))
+                    st.success("Publication scientifique enregistrée.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Impossible d'enregistrer la ressource : {exc}")
+
+        pubs=df("""SELECT id, type_publication AS type, titre,auteurs,annee,domaine,projet,resume,
+                          mots_cles,public_cible,reference,lien,statut,observations
+                   FROM scientific_publications
+                   WHERE type_publication NOT IN ('Note politique','Note de synthèse')
+                   ORDER BY annee DESC,id DESC""")
+        st.subheader("📋 Registre des publications scientifiques")
+        st.dataframe(pubs,use_container_width=True,hide_index=True)
+        export_buttons(pubs,"publications_scientifiques","Publications scientifiques CRA/ISRA")
+
+    def render_publication_note(ptype, icon):
+        st.subheader(f"{icon} {ptype}")
+        with st.form(f"publication_{ptype.replace(' ','_')}"):
+            c1,c2,c3=st.columns(3)
+            titre=c1.text_input("Titre *",key=f"{ptype}_titre")
+            auteurs=c2.text_input("Auteur(s)",key=f"{ptype}_auteurs")
+            annee=c3.number_input("Année",1900,2100,value=date.today().year,key=f"{ptype}_annee")
+            c1,c2,c3=st.columns(3)
+            domaine=c1.text_input("Domaine",key=f"{ptype}_domaine")
+            projet=c2.text_input("Projet",key=f"{ptype}_projet")
+            public_cible=c3.text_input("Public cible",key=f"{ptype}_public")
+            resume=st.text_area("Résumé",key=f"{ptype}_resume")
+            c1,c2,c3=st.columns(3)
+            mots=c1.text_input("Mots-clés",key=f"{ptype}_mots")
+            reference=c2.text_input("Référence / DOI",key=f"{ptype}_reference")
+            lien=drive_link_input("Lien web / document Drive",key=f"{ptype}_lien")
+            statut=st.selectbox("Statut",["Disponible","En préparation","Archivé"],key=f"{ptype}_statut")
+            observations=st.text_area("Observations",key=f"{ptype}_observations")
+            ok=st.form_submit_button(f"💾 Enregistrer — {ptype}",type="primary")
+        if ok:
+            if not titre.strip():
+                st.error("Le titre est obligatoire.")
+            else:
+                q("""INSERT INTO scientific_publications(type_publication,titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,fichier,lien,statut,observations)
+                     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                  (ptype,titre,auteurs,annee,domaine,projet,resume,mots,public_cible,reference,None,lien,statut,observations))
+                st.success(f"{ptype} enregistrée."); st.rerun()
+        data=df("SELECT id,type_publication,titre,auteurs,annee,domaine,projet,reference,statut,lien FROM scientific_publications WHERE type_publication=? ORDER BY annee DESC,id DESC",(ptype,))
+        st.dataframe(data,use_container_width=True,hide_index=True)
+        export_buttons(data,ptype.lower().replace(' ','_'),ptype)
+
+    with tab_note_politique:
+        render_publication_note("Note politique", "🗒️")
+    with tab_note_synthese:
+        render_publication_note("Note de synthèse", "📋")
 
 
 def render_reports():
@@ -3015,9 +3190,10 @@ def render_reports():
     )
 
     people = df(
-        "SELECT id, nom, prenom, fonction, structure, categorie, telephone, email, "
-        "localite, region, observations "
-        "FROM people ORDER BY nom, prenom"
+        'SELECT id, nom AS "Nom", prenom AS "Prénom", fonction AS "Fonction / poste", '
+        'structure AS "Structure", categorie AS "Catégorie", telephone AS "Téléphone", '
+        'email AS "E-mail", localite AS "Lieu d’origine", region AS "Région", observations AS "Observations" '
+        'FROM people ORDER BY nom, prenom'
     )
 
     visits = df(
@@ -3065,10 +3241,16 @@ def render_reports():
                 ', ' ORDER BY rp.nom
             ) AS chercheurs,
             rv.date_action,
+            rv.titre AS titre_document,
+            rv.auteurs,
+            rv.annee,
+            COALESCE(NULLIF(rv.type_document,''), rv.type_valorisation) AS type_document,
             rv.domaine,
             rv.thematique,
-            rv.projet,
-            rv.type_valorisation,
+            rv.mots_cles,
+            rv.etat,
+            rv.format_document,
+            rv.resume,
             rv.support,
             rv.lien,
             rv.observations
@@ -3548,3 +3730,5 @@ elif page == "📊 Rapports & exports":
     render_reports()
 
 st.caption("ISRA • CRA — IST et Communication | Organisation : Communication • Documentations (Catalogue documentaire unifié, Consultations, Personnes, Prêts et retours) • Résultats scientifiques (publications et notes) | Formats : PDF • Excel • CSV")
+
+
