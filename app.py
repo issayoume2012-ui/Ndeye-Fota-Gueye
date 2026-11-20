@@ -2383,8 +2383,13 @@ def _ask_gemini(question, context, history):
     )
     try:
         with urllib.request.urlopen(request, timeout=45) as response:
-        with urllib.request.urlopen(request, timeout=30) as response:
             data = json.loads(response.read().decode("utf-8"))
+        response = urllib.request.urlopen(request, timeout=30)
+        try:
+            response_text = response.read().decode("utf-8")
+        finally:
+            response.close()
+        data = json.loads(response_text)
         return "".join(part.get("text", "") for part in data["candidates"][0]["content"]["parts"] if "text" in part).strip()
     except urllib.error.HTTPError as exc:
         try:
