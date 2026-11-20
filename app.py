@@ -2370,6 +2370,7 @@ def render_ai_assistant():
     st.caption("Espaces recherchés : " + ", ".join(allowed))
     if "ai_assistant_history" not in st.session_state:
         st.session_state.ai_assistant_history = []
+    st.session_state.setdefault("ai_assistant_history", [])
 
     for message in st.session_state.ai_assistant_history:
         with st.chat_message(message["role"]):
