@@ -658,6 +658,7 @@ init_db()
 # HELPERS
 # -----------------------------
 def q(sql, params=(), fetch=False):
+def q(sql, params=(), fetch=False, timeout_ms=None):
     active_user = globals().get("CURRENT_USER")
     if active_user and not active_user.get("is_admin"):
         operation = sql.lstrip().split(None, 1)[0].upper() if sql.strip() else ""
@@ -669,6 +670,9 @@ def q(sql, params=(), fetch=False):
     conn = get_conn()
     cur = conn.cursor()
     try:
+        if timeout_ms is not None:
+            timeout_ms = max(1000, min(int(timeout_ms), 60000))
+            cur.execute("SELECT set_config('statement_timeout', ?, TRUE)", (f"{timeout_ms}ms",))
         # IMPORTANT : ne pas passer un tuple de paramètres vide à psycopg2.
         # Avec des requêtes contenant des motifs LIKE tels que '%rapport%',
         # psycopg2 peut interpréter les signes % comme des marqueurs de format
@@ -682,6 +686,7 @@ def q(sql, params=(), fetch=False):
         if fetch:
             rows = cur.fetchall()
             columns = [d[0] for d in cur.description] if cur.description else []
+            conn.commit()
             return [dict(zip(columns, row)) for row in rows]
         last = None
         if cur.description and cur.description[0][0] == "id":
@@ -2275,9 +2280,18 @@ def _assistant_gemini_key():
 
 def _assistant_json_value(value):
     if value is None or (not isinstance(value, (str, int, float, bool)) and pd.isna(value)):
+    if value is None:
         return None
     if isinstance(value, (date, datetime)):
         return value.isoformat()
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, ensure_ascii=False, default=str)[:1200]
+    try:
+        missing = pd.isna(value)
+        if getattr(missing, "ndim", 0) == 0 and bool(missing):
+            return None
+    except (TypeError, ValueError):
+        pass
     return str(value)[:1200] if not isinstance(value, (int, float, bool)) else value
 
 
@@ -2290,6 +2304,9 @@ def _assistant_search_site(question):
     """Recherche en lecture seule dans l'ensemble des données, réservée aux admins."""
     if not globals().get("CURRENT_USER", {}).get("is_admin"):
         raise PermissionError("L’assistant Fota Gueye est réservé aux administrateurs.")
+    small_talk = re.sub(r"[.!?]+$", "", question.strip().lower()).strip()
+    if small_talk in {"bonjour", "salut", "bonsoir", "coucou", "merci", "qui es-tu", "qui es tu", "comment vas-tu", "comment vas tu", "comment ça va", "aide", "help"}:
+        return []
     ignored = {"dans", "avec", "pour", "quoi", "quel", "quelle", "quels", "quelles", "combien", "montre", "donne", "faire", "sont", "cette", "depuis", "entre", "tous", "toutes", "plus", "moins", "note", "ecris", "rédige", "redige", "des", "les", "une", "est", "qui", "sur", "par", "aux", "année", "annee"}
     hints = {
         "📣 Communication": ("activité", "activite", "communication", "média", "media", "audiovisuel", "presse", "événement", "evenement", "format"),
@@ -2305,13 +2322,15 @@ def _assistant_search_site(question):
     relevant_pages = [p for p, words in hints.items() if any(w in question_lower for w in words)]
     if not relevant_pages:
         relevant_pages = [p for p in AI_SEARCH_SOURCES if p in allowed_pages]
+    results = []
         relevant_pages = list(AI_SEARCH_SOURCES)
     topic_words = {w for page in relevant_pages for w in hints.get(page, ()) if w in question_lower}
     terms = [
         term for term in re.findall(r"[\wÀ-ÿ-]{3,}", question_lower)
         if term not in ignored and not any(term in topic or topic in term for topic in topic_words)
     ][:6]
-    results = []
+
+    selected_sources = []
     for page_name, tables in AI_SEARCH_SOURCES.items():
         if page_name not in relevant_pages:
             continue
@@ -2324,6 +2343,16 @@ def _assistant_search_site(question):
                     clauses.append("(" + " OR ".join(term_clauses) + ")")
                     params.extend([f"%{term}%"] * len(columns))
                 where_sql = " OR ".join(clauses)
+                selected = ["id"] + columns
+                rows = q(
+                    f"SELECT {', '.join(selected)}, COUNT(*) OVER() AS match_count FROM {table} WHERE {where_sql} ORDER BY id DESC LIMIT 5",
+                    tuple(params), fetch=True
+                ) or []
+                summary["correspondances_recherche"] = int(rows[0].get("match_count", 0)) if rows else 0
+                summary["extraits"] = [
+                    {k: _assistant_json_value(v) for k, v in row.items() if k != "match_count" and v not in (None, "")}
+                    for row in rows
+                ]
                 requested_year = re.search(r"\b(?:19|20)\d{2}\b", question_lower)
                 if requested_year:
                     year_fields = []
@@ -2335,22 +2364,59 @@ def _assistant_search_site(question):
                     if year_fields:
                         where_sql = f"({where_sql}) AND ({' OR '.join(year_fields)})"
                         params.extend([int(requested_year.group(0))] * len(year_fields))
-                selected = ["id"] + columns
-                rows = q(
-                    f"SELECT {', '.join(selected)}, COUNT(*) OVER() AS match_count FROM {table} WHERE {where_sql} ORDER BY id DESC LIMIT 5",
-                    f"SELECT {', '.join(selected)}, COUNT(*) OVER() AS match_count FROM {table} WHERE {where_sql} ORDER BY id DESC LIMIT 3",
-                    tuple(params), fetch=True
-                ) or []
-                summary["correspondances_recherche"] = int(rows[0].get("match_count", 0)) if rows else 0
-                summary["extraits"] = [
-                    {k: _assistant_json_value(v) for k, v in row.items() if k != "match_count" and v not in (None, "")}
-                    for row in rows
-                ]
+                selected_sources.append((label, table, columns, where_sql, params))
             else:
                 total = q(f"SELECT COUNT(*) AS n FROM {table}", fetch=True)[0]["n"]
                 summary["total_enregistrements"] = int(total or 0)
             results.append(summary)
     return results
+                selected_sources.append((label, table, columns, None, []))
+
+    if terms:
+        branches, query_params = [], []
+        for label, table, columns, where_sql, params in selected_sources:
+            label_sql = label.replace("'", "''")
+            field_pairs = [f"'{column}', src.{column}" for column in columns]
+            record_sql = "jsonb_build_object(" + ", ".join(["'id', src.id"] + field_pairs) + ")"
+            branches.append(
+                f"SELECT '{label_sql}' AS rubrique, src.id, {record_sql} AS extrait "
+                f"FROM {table} AS src WHERE {where_sql}"
+            )
+            query_params.extend(params)
+        union_sql = " UNION ALL ".join(branches)
+        query = f"""
+            SELECT rubrique, id, extrait, match_count
+            FROM (
+                SELECT rubrique, id, extrait,
+                       COUNT(*) OVER (PARTITION BY rubrique) AS match_count,
+                       ROW_NUMBER() OVER (PARTITION BY rubrique ORDER BY id DESC) AS row_number
+                FROM ({union_sql}) AS matched_rows
+            ) AS ranked_rows
+            WHERE row_number <= 3
+            ORDER BY rubrique, id DESC
+        """
+        rows = q(query, tuple(query_params), fetch=True, timeout_ms=10000) or []
+        results_by_label = {
+            label: {"rubrique": label, "correspondances_recherche": 0, "extraits": []}
+            for label, _, _, _, _ in selected_sources
+        }
+        for row in rows:
+            item = results_by_label[row["rubrique"]]
+            item["correspondances_recherche"] = int(row.get("match_count") or 0)
+            record = row.get("extrait") or {}
+            if isinstance(record, str):
+                record = json.loads(record)
+            if not isinstance(record, dict):
+                record = {}
+            item["extraits"].append({k: _assistant_json_value(v) for k, v in record.items() if v not in (None, "")})
+        return list(results_by_label.values())
+
+    count_branches = []
+    for label, table, _, _, _ in selected_sources:
+        label_sql = label.replace("'", "''")
+        count_branches.append(f"SELECT '{label_sql}' AS rubrique, COUNT(*) AS total_enregistrements FROM {table}")
+    rows = q(" UNION ALL ".join(count_branches), fetch=True, timeout_ms=10000) or []
+    return [{"rubrique": row["rubrique"], "total_enregistrements": int(row.get("total_enregistrements") or 0)} for row in rows]
 
 
 def _ask_gemini(question, context, history):
@@ -2376,7 +2442,14 @@ def _ask_gemini(question, context, history):
         f"Échanges récents : {json.dumps(history[-4:], ensure_ascii=False)[:2500]}\n\nQuestion : {question}"
     )
     payload = json.dumps({"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1200}}).encode("utf-8")
-    payload = json.dumps({"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.15, "maxOutputTokens": 1100}}).encode("utf-8")
+    payload = json.dumps({
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.15,
+            "maxOutputTokens": 2048,
+            "thinkingConfig": {"thinkingLevel": "low"},
+        },
+    }).encode("utf-8")
     request = urllib.request.Request(
         f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
         data=payload, headers={"Content-Type": "application/json", "x-goog-api-key": api_key}, method="POST"
@@ -2384,13 +2457,20 @@ def _ask_gemini(question, context, history):
     try:
         with urllib.request.urlopen(request, timeout=45) as response:
             data = json.loads(response.read().decode("utf-8"))
-        response = urllib.request.urlopen(request, timeout=30)
+        return "".join(part.get("text", "") for part in data["candidates"][0]["content"]["parts"] if "text" in part).strip()
+        response = urllib.request.urlopen(request, timeout=20)
         try:
             response_text = response.read().decode("utf-8")
         finally:
             response.close()
         data = json.loads(response_text)
-        return "".join(part.get("text", "") for part in data["candidates"][0]["content"]["parts"] if "text" in part).strip()
+        candidates = data.get("candidates") or []
+        if not candidates:
+            raise RuntimeError("Gemini n’a renvoyé aucune réponse. Vérifiez le quota du projet et réessayez.")
+        answer = "".join(part.get("text", "") for part in candidates[0].get("content", {}).get("parts", []) if "text" in part).strip()
+        if not answer:
+            raise RuntimeError("Gemini a terminé sans texte de réponse. Reformulez la demande et réessayez.")
+        return answer
     except urllib.error.HTTPError as exc:
         try:
             error_data = json.loads(exc.read().decode("utf-8", errors="replace"))
@@ -2463,6 +2543,10 @@ def render_ai_assistant():
                 st.session_state.ai_assistant_history.append({"role": "assistant", "content": answer})
             except Exception as exc:
                 st.error(str(exc))
+                error_message = f"Je n’ai pas pu répondre : {exc}"
+                st.session_state.ai_assistant_history.append({"role": "assistant", "content": error_message})
+                st.error(error_message)
+        del st.session_state.ai_assistant_history[:-20]
         st.rerun()
 
     if st.button("Effacer la conversation", key="clear_ai_assistant"):
@@ -2635,6 +2719,10 @@ def render_dashboard():
     documents_recent = df("SELECT titre, auteurs, annee, type_document, lien, 'Ressource documentaire / IST' AS origine FROM documents ORDER BY id DESC LIMIT 8")
     recent = pd.concat([library_recent, documents_recent], ignore_index=True, sort=False)
     if not recent.empty:
+        recent = recent.sort_values("annee", ascending=False, na_position="last", kind="stable").copy()
+        recent["_titre_key"] = recent["titre"].fillna("").astype(str).str.casefold().str.replace(r"\s+", " ", regex=True).str.strip()
+        recent["_auteurs_key"] = recent["auteurs"].fillna("").astype(str).str.casefold().str.replace(r"\s+", " ", regex=True).str.strip()
+        recent = recent.drop_duplicates(subset=["_titre_key", "_auteurs_key", "annee"], keep="first").drop(columns=["_titre_key", "_auteurs_key"])
         st.dataframe(recent.sort_values("annee", ascending=False, na_position="last"), use_container_width=True, hide_index=True,
                      column_config={"lien": st.column_config.LinkColumn("Lien / Drive", display_text="Ouvrir ↗")})
     else:
