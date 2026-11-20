@@ -2355,6 +2355,8 @@ def _ask_gemini(question, context, history):
 def render_ai_assistant():
     st.title("🤖 Assistant IA")
     st.caption("Recherchez dans les espaces auxquels votre compte a accès, obtenez des chiffres ou demandez la rédaction d’une note.")
+    st.subheader("🤖 Fota Gueye — votre assistant")
+    st.caption("Posez une question sur les données du site, demandez un chiffre ou faites rédiger une note.")
     st.info("Pour répondre, les extraits de recherche autorisés sont envoyés à l’API Gemini de Google. Les coordonnées personnelles ne sont pas incluses. Les réponses IA peuvent comporter des erreurs.")
     if not _assistant_gemini_key():
         st.warning("Gemini n’est pas encore configuré. Créez une clé dans Google AI Studio, puis ajoutez-la aux secrets Streamlit sous le nom GEMINI_API_KEY.")
@@ -2371,6 +2373,17 @@ def render_ai_assistant():
             st.markdown(message["content"])
     question = st.chat_input("Ex. Combien de publications en 2024 ? Rédige une note sur…")
     if question:
+
+    with st.form("fota_gueye_chat_form", clear_on_submit=True):
+        question = st.text_area(
+            "Votre message à Fota Gueye",
+            placeholder="Ex. Combien de publications en 2024 ? Rédige une note sur les activités récentes…",
+            height=90,
+            key="fota_gueye_question",
+        )
+        send_message = st.form_submit_button("Envoyer à Fota Gueye", type="primary", use_container_width=True)
+
+    if send_message and question and question.strip():
         st.session_state.ai_assistant_history.append({"role": "user", "content": question})
         with st.chat_message("user"):
             st.markdown(question)
@@ -4004,5 +4017,4 @@ elif page == "📊 Rapports & exports":
     render_reports()
 
 st.caption("ISRA • CRA — IST et Communication | Organisation : Communication • Documentations (Catalogue documentaire unifié, Consultations, Personnes, Prêts et retours) • Résultats scientifiques (publications et notes) | Formats : PDF • Excel • CSV")
-
 
