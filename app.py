@@ -2353,8 +2353,6 @@ def _ask_gemini(question, context, history):
 
 
 def render_ai_assistant():
-    st.title("🤖 Assistant IA")
-    st.caption("Recherchez dans les espaces auxquels votre compte a accès, obtenez des chiffres ou demandez la rédaction d’une note.")
     st.subheader("🤖 Fota Gueye — votre assistant")
     st.caption("Posez une question sur les données du site, demandez un chiffre ou faites rédiger une note.")
     st.info("Pour répondre, les extraits de recherche autorisés sont envoyés à l’API Gemini de Google. Les coordonnées personnelles ne sont pas incluses. Les réponses IA peuvent comporter des erreurs.")
@@ -2368,15 +2366,11 @@ def render_ai_assistant():
         return
 
     st.caption("Espaces recherchés : " + ", ".join(allowed))
-    if "ai_assistant_history" not in st.session_state:
-        st.session_state.ai_assistant_history = []
     st.session_state.setdefault("ai_assistant_history", [])
 
     for message in st.session_state.ai_assistant_history:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
-    question = st.chat_input("Ex. Combien de publications en 2024 ? Rédige une note sur…")
-    if question:
 
     # Le formulaire reste hors du bloc de traitement pour apparaître à chaque rendu.
     with st.form("fota_gueye_chat_form", clear_on_submit=True):
@@ -2390,8 +2384,6 @@ def render_ai_assistant():
 
     if send_message and question and question.strip():
         st.session_state.ai_assistant_history.append({"role": "user", "content": question})
-        with st.chat_message("user"):
-            st.markdown(question)
         with st.chat_message("assistant"):
             try:
                 with st.spinner("Recherche dans les espaces autorisés et préparation de la réponse…"):
@@ -4023,4 +4015,5 @@ elif page == "📊 Rapports & exports":
     render_reports()
 
 st.caption("ISRA • CRA — IST et Communication | Organisation : Communication • Documentations (Catalogue documentaire unifié, Consultations, Personnes, Prêts et retours) • Résultats scientifiques (publications et notes) | Formats : PDF • Excel • CSV")
+
 
