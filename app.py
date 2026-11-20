@@ -2353,14 +2353,18 @@ def _assistant_search_site(question):
                 requested_year = re.search(r"\b(?:19|20)\d{2}\b", question_lower)
                 if requested_year:
                     year_fields = []
+                    year_params = []
                     if "annee" in columns:
                         year_fields.append("CAST(annee AS TEXT) = ?")
+                        year_params.append(requested_year.group(0))
                     for column in columns:
                         if column.startswith("date_") or column.endswith("_date"):
                             year_fields.append(f"EXTRACT(YEAR FROM {column}) = ?")
+                            year_params.append(int(requested_year.group(0)))
                     if year_fields:
                         where_sql = f"({where_sql}) AND ({' OR '.join(year_fields)})"
                         params.extend([int(requested_year.group(0))] * len(year_fields))
+                        params.extend(year_params)
                 selected_sources.append((label, table, columns, where_sql, params))
             else:
                 selected_sources.append((label, table, columns, None, []))
@@ -4303,5 +4307,4 @@ elif page == "📊 Rapports & exports":
     render_reports()
 
 st.caption("ISRA • CRA — IST et Communication | Organisation : Communication • Documentations (Catalogue documentaire unifié, Consultations, Personnes, Prêts et retours) • Résultats scientifiques (publications et notes) | Formats : PDF • Excel • CSV")
-
 
