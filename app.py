@@ -12,6 +12,9 @@ import hashlib
 import html
 import urllib.request
 import urllib.error
+import socket
+import ssl
+import time
 
 try:
     from supabase import create_client, Client
@@ -2389,7 +2392,7 @@ def _ask_gemini(question, context, history):
     api_key = _assistant_gemini_key()
     if not api_key:
         raise RuntimeError("La clé Gemini n'est pas configurée. Ajoutez GEMINI_API_KEY dans les secrets Streamlit.")
-    model = (os.getenv("GEMINI_MODEL", "gemini-3.8-flash") or "gemini-3.8-flash").strip()
+    model = (os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite") or "gemini-3.5-flash-lite").strip()
     prompt = (
         "Tu es Fota Gueye, assistante de recherche du site interne CRA/ISRA. Réponds en français, directement, clairement et uniquement à partir du contexte fourni. "
         "Les nombres calculés par la base sont fiables. Utilise les totaux exacts pour les questions générales de décompte, et les correspondances filtrées lorsqu'une année ou un terme précis est demandé. "
@@ -2405,49 +2408,70 @@ def _ask_gemini(question, context, history):
         "generationConfig": {
             "temperature": 0.15,
             "maxOutputTokens": 2048,
-            "thinkingConfig": {"thinkingLevel": "low"},
+            "thinkingConfig": {"thinkingLevel": "minimal"},
         },
     }).encode("utf-8")
     request = urllib.request.Request(
         f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
         data=payload, headers={"Content-Type": "application/json", "x-goog-api-key": api_key}, method="POST"
     )
-    try:
-        response = urllib.request.urlopen(request, timeout=20)
+    for attempt in range(2):
         try:
-            response_text = response.read().decode("utf-8")
-        finally:
-            response.close()
-        data = json.loads(response_text)
-        candidates = data.get("candidates") or []
-        if not candidates:
-            raise RuntimeError("Gemini n’a renvoyé aucune réponse. Vérifiez le quota du projet et réessayez.")
-        answer = "".join(part.get("text", "") for part in candidates[0].get("content", {}).get("parts", []) if "text" in part).strip()
-        if not answer:
-            raise RuntimeError("Gemini a terminé sans texte de réponse. Reformulez la demande et réessayez.")
-        return answer
-    except urllib.error.HTTPError as exc:
-        try:
-            error_data = json.loads(exc.read().decode("utf-8", errors="replace"))
-            google_message = error_data.get("error", {}).get("message", "")
-            google_status = error_data.get("error", {}).get("status", "")
-        except Exception:
-            google_message, google_status = "", ""
-        if exc.code == 400:
-            hint = "Vérifiez le nom du secret GEMINI_API_KEY, la clé complète et le modèle configuré."
-        elif exc.code == 401:
-            hint = "Vérifiez que la clé est copiée sans guillemets ni espaces dans Streamlit Secrets et qu’elle est active dans AI Studio."
-        elif exc.code == 403:
-            hint = "Vérifiez l’activation de Gemini API et les restrictions de la clé dans Google AI Studio."
-        elif exc.code == 429:
-            hint = "Le quota gratuit est atteint ou limité temporairement. Réessayez plus tard ou contrôlez le quota du projet."
-        else:
-            hint = f"Vérifiez la configuration Gemini API et la disponibilité du modèle {model}."
-        detail = f" — {google_message}" if google_message else ""
-        status = f" ({google_status})" if google_status else ""
-        raise RuntimeError(f"Gemini a refusé la demande (HTTP {exc.code}{status}){detail}. {hint}") from exc
-    except (urllib.error.URLError, TimeoutError) as exc:
-        raise RuntimeError("Impossible de joindre Gemini. Vérifiez la connexion réseau de l'hébergement.") from exc
+            response = urllib.request.urlopen(request, timeout=20)
+            try:
+                response_text = response.read().decode("utf-8")
+            finally:
+                response.close()
+            data = json.loads(response_text)
+            candidates = data.get("candidates") or []
+            if not candidates:
+                raise RuntimeError("Gemini n’a renvoyé aucune réponse. Vérifiez le quota du projet et réessayez.")
+            answer = "".join(part.get("text", "") for part in candidates[0].get("content", {}).get("parts", []) if "text" in part).strip()
+            if not answer:
+                raise RuntimeError("Gemini a terminé sans texte de réponse. Reformulez la demande et réessayez.")
+            return answer
+        except urllib.error.HTTPError as exc:
+            try:
+                error_data = json.loads(exc.read().decode("utf-8", errors="replace"))
+                google_message = error_data.get("error", {}).get("message", "")
+                google_status = error_data.get("error", {}).get("status", "")
+            except Exception:
+                google_message, google_status = "", ""
+            if exc.code in (500, 502, 503, 504) and attempt == 0:
+                time.sleep(0.7)
+                continue
+            if exc.code == 400:
+                hint = "Vérifiez la clé complète et le nom du modèle dans les secrets Streamlit."
+            elif exc.code == 401:
+                hint = "La clé Gemini est refusée : vérifiez qu’elle est active et copiée sans espaces ni guillemets."
+            elif exc.code == 403:
+                hint = "Gemini API est désactivée ou la clé est restreinte dans Google AI Studio."
+            elif exc.code == 429:
+                hint = "Le quota ou la limite de débit Gemini est atteint. Contrôlez Usage & Billing dans AI Studio."
+            elif exc.code in (500, 502, 503, 504):
+                hint = "Le service Gemini est temporairement indisponible. Réessayez dans quelques instants."
+            else:
+                hint = f"Vérifiez la disponibilité du modèle {model} et la configuration de Gemini API."
+            detail = f" — {google_message}" if google_message else ""
+            status = f" ({google_status})" if google_status else ""
+            raise RuntimeError(f"Gemini a refusé la demande (HTTP {exc.code}{status}){detail}. {hint}") from exc
+        except urllib.error.URLError as exc:
+            reason = exc.reason
+            if isinstance(reason, (socket.timeout, TimeoutError)):
+                detail = "Le serveur Gemini n’a pas répondu en 20 secondes."
+                cause = "délai dépassé"
+            elif isinstance(reason, socket.gaierror):
+                detail = "L’hébergement Streamlit n’arrive pas à résoudre generativelanguage.googleapis.com (DNS)."
+                cause = str(reason)
+            elif isinstance(reason, ssl.SSLError):
+                detail = "La connexion sécurisée à Google a échoué (SSL/TLS)."
+                cause = str(reason)
+            else:
+                detail = "La connexion au serveur Gemini a échoué."
+                cause = f"{type(reason).__name__}: {reason}"
+            raise RuntimeError(f"{detail} Détail technique : {cause}") from exc
+        except (TimeoutError, socket.timeout) as exc:
+            raise RuntimeError("Le serveur Gemini n’a pas répondu en 20 secondes (délai dépassé).") from exc
 
 
 def render_ai_assistant():
