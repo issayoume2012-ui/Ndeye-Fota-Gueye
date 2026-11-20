@@ -2360,20 +2360,24 @@ def render_ai_assistant():
     st.info("Pour répondre, les extraits de recherche autorisés sont envoyés à l’API Gemini de Google. Les coordonnées personnelles ne sont pas incluses. Les réponses IA peuvent comporter des erreurs.")
     if not _assistant_gemini_key():
         st.warning("Gemini n’est pas encore configuré. Créez une clé dans Google AI Studio, puis ajoutez-la aux secrets Streamlit sous le nom GEMINI_API_KEY.")
+
     allowed = APP_PAGES if CURRENT_USER.get("is_admin") else (CURRENT_USER.get("allowed_pages") or [])
     allowed = [p for p in allowed if p in AI_SEARCH_SOURCES]
     if not allowed:
         st.warning("Aucun espace de recherche n’est autorisé pour ce compte. Demandez à l’administrateur d’ajouter les accès nécessaires.")
         return
+
     st.caption("Espaces recherchés : " + ", ".join(allowed))
     if "ai_assistant_history" not in st.session_state:
         st.session_state.ai_assistant_history = []
+
     for message in st.session_state.ai_assistant_history:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
     question = st.chat_input("Ex. Combien de publications en 2024 ? Rédige une note sur…")
     if question:
 
+    # Le formulaire reste hors du bloc de traitement pour apparaître à chaque rendu.
     with st.form("fota_gueye_chat_form", clear_on_submit=True):
         question = st.text_area(
             "Votre message à Fota Gueye",
@@ -2399,6 +2403,7 @@ def render_ai_assistant():
             except Exception as exc:
                 st.error(str(exc))
         st.rerun()
+
     if st.button("Effacer la conversation", key="clear_ai_assistant"):
         st.session_state.ai_assistant_history = []
         st.rerun()
