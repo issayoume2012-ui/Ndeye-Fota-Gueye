@@ -2640,9 +2640,7 @@ def render_dashboard():
     else:
         st.info("Le Catalogue n'a pas encore de ressource.")
 
-    if CURRENT_USER.get("is_admin"):
     render_ai_assistant()
-        render_ai_assistant()
 
 def render_activities():
     st.header("➕ Activités")
