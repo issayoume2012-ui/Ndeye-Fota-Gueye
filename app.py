@@ -674,7 +674,7 @@ def q(sql, params=(), fetch=False, timeout_ms=None):
     try:
         if timeout_ms is not None:
             timeout_ms = max(1000, min(int(timeout_ms), 60000))
-            cur.execute("SELECT set_config('statement_timeout', ?, TRUE)", (f"{timeout_ms}ms",))
+            cur.execute(_sql("SELECT set_config('statement_timeout', ?, TRUE)"), (f"{timeout_ms}ms",))
         # IMPORTANT : ne pas passer un tuple de paramètres vide à psycopg2.
         # Avec des requêtes contenant des motifs LIKE tels que '%rapport%',
         # psycopg2 peut interpréter les signes % comme des marqueurs de format
