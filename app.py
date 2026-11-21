@@ -2369,12 +2369,13 @@ def _assistant_db_schema():
         data_type = str(row.get("data_type") or "").lower()
         if not table or not column or data_type == "bytea":
             continue
+        if not table or not column or data_type == "bytea": continue
         # Les identifiants techniques nécessaires à la recherche sont gardés,
         # mais aucun secret ni hash de mot de passe ne quitte la base.
         if column.lower() == "password_hash" or "secret" in column.lower() or "token" in column.lower():
-        column_lower = column.lower()
-        if any(marker in column_lower for marker in ("password", "secret", "token", "api_key")):
             continue
+        column_lower = column.lower()
+        if any(marker in column_lower for marker in ("password", "secret", "token", "api_key")): continue
         schema.setdefault(table, []).append(column)
     return schema
 
