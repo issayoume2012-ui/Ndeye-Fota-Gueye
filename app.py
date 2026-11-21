@@ -2295,20 +2295,58 @@ def _assistant_gemini_key():
         return os.getenv("GEMINI_API_KEY", "").strip()
 
 
-def _assistant_json_value(value):
+def _assistant_json_value(value, max_length=1200):
     if value is None:
         return None
     if isinstance(value, (date, datetime)):
         return value.isoformat()
     if isinstance(value, (dict, list, tuple)):
-        return json.dumps(value, ensure_ascii=False, default=str)[:1200]
+        serialized = json.dumps(value, ensure_ascii=False, default=str)
+        return serialized if max_length is None else serialized[:max_length]
     try:
         missing = pd.isna(value)
         if getattr(missing, "ndim", 0) == 0 and bool(missing):
             return None
     except (TypeError, ValueError):
         pass
-    return str(value)[:1200] if not isinstance(value, (int, float, bool)) else value
+    if isinstance(value, (int, float, bool)):
+        return value
+    serialized = str(value)
+    return serialized if max_length is None else serialized[:max_length]
+
+
+def _assistant_wants_all(question):
+    question_lower = question.lower()
+    return any(token in question_lower for token in (
+        "toutes les infos", "toutes les informations", "toutes les données", "toutes les donnees",
+        "tous les résultats", "tous les resultats", "liste complète", "liste complete",
+        "intégralité", "integralite", "sans exception", "tout afficher", "tout sortir",
+    ))
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _assistant_db_schema():
+    """Lit le schéma réel afin de rester compatible avec les anciennes bases déployées."""
+    rows = q(
+        """SELECT table_name, column_name, data_type
+           FROM information_schema.columns
+           WHERE table_schema = current_schema()""",
+        fetch=True,
+        timeout_ms=5000,
+    ) or []
+    schema = {}
+    for row in rows:
+        table = row.get("table_name")
+        column = row.get("column_name")
+        data_type = str(row.get("data_type") or "").lower()
+        if not table or not column or data_type == "bytea":
+            continue
+        # Les identifiants techniques nécessaires à la recherche sont gardés,
+        # mais aucun secret ni hash de mot de passe ne quitte la base.
+        if column.lower() == "password_hash" or "secret" in column.lower() or "token" in column.lower():
+            continue
+        schema.setdefault(table, []).append(column)
+    return schema
 
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -2319,7 +2357,7 @@ def _assistant_search_site(question):
     small_talk = re.sub(r"[.!?]+$", "", question.strip().lower()).strip()
     if small_talk in {"bonjour", "salut", "bonsoir", "coucou", "merci", "qui es-tu", "qui es tu", "comment vas-tu", "comment vas tu", "comment ça va", "aide", "help"}:
         return []
-    ignored = {"dans", "avec", "pour", "quoi", "quel", "quelle", "quels", "quelles", "combien", "montre", "donne", "faire", "sont", "cette", "depuis", "entre", "tous", "toutes", "plus", "moins", "note", "ecris", "rédige", "redige", "des", "les", "une", "est", "qui", "sur", "par", "aux", "année", "annee"}
+    ignored = {"dans", "avec", "pour", "quoi", "quel", "quelle", "quels", "quelles", "combien", "nombre", "nombres", "total", "statistique", "statistiques", "chiffre", "chiffres", "montre", "donne", "faire", "sont", "cette", "depuis", "entre", "tous", "toutes", "plus", "moins", "note", "ecris", "rédige", "redige", "des", "les", "une", "est", "qui", "sur", "par", "aux", "année", "annee", "information", "informations", "info", "infos", "donnée", "donnee", "données", "donnees", "site", "système", "systeme", "liste", "complet", "complete", "complète", "completes", "intégralité", "integralite", "exhaustif", "exhaustive", "affiche", "afficher", "sortir", "tout", "entier", "entière", "en", "du"}
     hints = {
         "📣 Communication": ("activité", "activite", "communication", "média", "media", "audiovisuel", "presse", "événement", "evenement", "format", "participant", "preuve", "justificatif"),
         "📚 Documentations": ("document", "livre", "catalogue", "bibliothèque", "bibliotheque", "prêt", "pret", "emprunt", "consultation", "personne", "ressource"),
@@ -2329,7 +2367,10 @@ def _assistant_search_site(question):
         "⚙️ Administration": ("compte", "utilisateur", "administrateur", "preuve", "justificatif", "association"),
     }
     question_lower = question.lower()
-    relevant_pages = [p for p, words in hints.items() if any(w in question_lower for w in words)]
+    all_site_request = any(token in question_lower for token in ("tout le site", "toutes les données", "toutes les donnees", "tout le système", "tout le systeme", "tout ce qui est enregistré", "tout ce qui est enregistre"))
+    complete_request = _assistant_wants_all(question)
+    count_request = bool(re.search(r"\b(combien|nombre|total|compte|décompte|decompte|statistique|chiffre)\b", question_lower))
+    relevant_pages = list(AI_SEARCH_SOURCES) if all_site_request else [p for p, words in hints.items() if any(w in question_lower for w in words)]
     if not relevant_pages:
         relevant_pages = list(AI_SEARCH_SOURCES)
     topic_words = {w for page in relevant_pages for w in hints.get(page, ()) if w in question_lower}
@@ -2338,44 +2379,52 @@ def _assistant_search_site(question):
         if term not in ignored and not any(term in topic or topic in term for topic in topic_words)
     ][:6]
 
+    actual_schema = _assistant_db_schema()
     selected_sources = []
     for page_name, tables in AI_SEARCH_SOURCES.items():
         if page_name not in relevant_pages:
             continue
-        for label, (table, columns) in tables.items():
+        for label, (table, _) in tables.items():
+            if table not in actual_schema or "id" not in actual_schema[table]:
+                continue
+            # Utilise toutes les colonnes actuellement disponibles de chaque
+            # table, et ignore proprement celles absentes des anciennes bases.
+            columns = actual_schema[table]
+            searchable_columns = [column for column in columns if column != "id"]
             if terms:
+                if not searchable_columns:
+                    continue
                 clauses, params = [], []
                 for term in terms:
-                    term_clauses = [f"CAST({col} AS TEXT) ILIKE ?" for col in columns]
+                    term_clauses = [f"CAST({col} AS TEXT) ILIKE ?" for col in searchable_columns]
                     clauses.append("(" + " OR ".join(term_clauses) + ")")
-                    params.extend([f"%{term}%"] * len(columns))
-                where_sql = " OR ".join(clauses)
+                    params.extend([f"%{term}%"] * len(searchable_columns))
+                # Tous les termes utiles doivent correspondre : cela évite de
+                # renvoyer toutes les lignes d'une année lorsque le nom demandé
+                # ne figure pas dans l'enregistrement.
+                where_sql = " AND ".join(clauses)
                 requested_year = re.search(r"\b(?:19|20)\d{2}\b", question_lower)
                 if requested_year:
                     year_fields = []
                     year_params = []
-                    if "annee" in columns:
+                    if "annee" in searchable_columns:
                         year_fields.append("CAST(annee AS TEXT) = ?")
                         year_params.append(requested_year.group(0))
-                    for column in columns:
+                    for column in searchable_columns:
                         if column.startswith("date_") or column.endswith("_date"):
                             year_fields.append(f"EXTRACT(YEAR FROM {column}) = ?")
                             year_params.append(int(requested_year.group(0)))
                     if year_fields:
                         where_sql = f"({where_sql}) AND ({' OR '.join(year_fields)})"
-                        params.extend([int(requested_year.group(0))] * len(year_fields))
                         params.extend(year_params)
                 selected_sources.append((label, table, columns, where_sql, params))
             else:
                 selected_sources.append((label, table, columns, None, []))
 
-    count_request = bool(re.search(r"\b(combien|nombre|total|compte|décompte|decompte|statistique|chiffre)\b", question_lower))
-    all_site_request = any(token in question_lower for token in ("tout le site", "toutes les données", "toutes les donnees", "tout le système", "tout le systeme", "tout ce qui est enregistré", "tout ce qui est enregistre"))
-    if all_site_request:
-        relevant_pages = list(AI_SEARCH_SOURCES)
-        selected_sources = [(label, table, columns, None, []) for groups in AI_SEARCH_SOURCES.values() for label, (table, columns) in groups.items()]
+    if not selected_sources:
+        return []
 
-    if count_request:
+    if count_request and not complete_request:
         count_branches, count_params = [], []
         for label, table, _, where_sql, params in selected_sources:
             label_sql = label.replace("'", "''")
@@ -2396,18 +2445,21 @@ def _assistant_search_site(question):
             )
             query_params.extend(params)
         union_sql = " UNION ALL ".join(branches)
-        query = f"""
-            SELECT rubrique, id, extrait, match_count
-            FROM (
-                SELECT rubrique, id, extrait,
-                       COUNT(*) OVER (PARTITION BY rubrique) AS match_count,
-                       ROW_NUMBER() OVER (PARTITION BY rubrique ORDER BY id DESC) AS row_number
-                FROM ({union_sql}) AS matched_rows
-            ) AS ranked_rows
-            WHERE row_number <= 3
-            ORDER BY rubrique, id DESC
-        """
-        rows = q(query, tuple(query_params), fetch=True, timeout_ms=10000) or []
+        if complete_request:
+            query = f"SELECT rubrique, id, extrait, NULL::BIGINT AS match_count FROM ({union_sql}) AS all_matches ORDER BY rubrique, id DESC"
+        else:
+            query = f"""
+                SELECT rubrique, id, extrait, match_count
+                FROM (
+                    SELECT rubrique, id, extrait,
+                           COUNT(*) OVER (PARTITION BY rubrique) AS match_count,
+                           ROW_NUMBER() OVER (PARTITION BY rubrique ORDER BY id DESC) AS row_number
+                    FROM ({union_sql}) AS matched_rows
+                ) AS ranked_rows
+                WHERE row_number <= 3
+                ORDER BY rubrique, id DESC
+            """
+        rows = q(query, tuple(query_params), fetch=True, timeout_ms=30000 if complete_request else 10000) or []
         results_by_label = {
             label: {"rubrique": label, "correspondances_recherche": 0, "extraits": []}
             for label, _, _, _, _ in selected_sources
@@ -2420,7 +2472,10 @@ def _assistant_search_site(question):
                 record = json.loads(record)
             if not isinstance(record, dict):
                 record = {}
-            item["extraits"].append({k: _assistant_json_value(v) for k, v in record.items() if v not in (None, "")})
+            item["extraits"].append({
+                k: _assistant_json_value(v, max_length=None if complete_request else 1200)
+                for k, v in record.items() if v not in (None, "")
+            })
         return [item for item in results_by_label.values() if item["extraits"]]
 
     count_branches = []
@@ -2529,6 +2584,9 @@ def render_ai_assistant():
     for message in st.session_state.ai_assistant_history:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
+            for section in message.get("full_results", []):
+                st.markdown(f"**{section['rubrique']} — {len(section['records'])} résultat(s)**")
+                st.dataframe(pd.DataFrame(section["records"]), use_container_width=True, hide_index=True)
 
     # Le formulaire reste hors du bloc de traitement pour apparaître à chaque rendu.
     with st.form("fota_gueye_chat_form", clear_on_submit=True):
@@ -2542,6 +2600,7 @@ def render_ai_assistant():
 
     if send_message and question and question.strip():
         st.session_state.ai_assistant_history.append({"role": "user", "content": question})
+        full_results = []
         with st.chat_message("assistant"):
             try:
                 normalized = re.sub(r"[.!?]+$", "", question.strip().lower()).strip()
@@ -2551,7 +2610,14 @@ def render_ai_assistant():
                 else:
                     with st.spinner("Recherche des données utiles et préparation de la réponse…"):
                         context = _assistant_search_site(question)
-                        if context and all(isinstance(item, dict) and "total_enregistrements" in item for item in context):
+                        if _assistant_wants_all(question) and context and any(item.get("extraits") for item in context):
+                            full_results = [
+                                {"rubrique": item["rubrique"], "records": item["extraits"]}
+                                for item in context if item.get("extraits")
+                            ]
+                            total_rows = sum(len(section["records"]) for section in full_results)
+                            answer = f"Voici tous les enregistrements correspondants : **{total_rows}** au total, répartis dans les tableaux ci-dessous. Les champs sensibles d’authentification et les données binaires ne sont pas exposés."
+                        elif context and all(isinstance(item, dict) and "total_enregistrements" in item for item in context):
                             answer = "Voici les chiffres calculés directement depuis la base :\n\n" + "\n".join(
                                 f"- **{item['rubrique']}** : {item['total_enregistrements']}"
                                 for item in context
@@ -2561,7 +2627,10 @@ def render_ai_assistant():
                                 raise RuntimeError("La clé GEMINI_API_KEY est absente des secrets Streamlit.")
                             answer = _ask_gemini(question, context, st.session_state.ai_assistant_history)
                 st.markdown(answer)
-                st.session_state.ai_assistant_history.append({"role": "assistant", "content": answer})
+                for section in full_results:
+                    st.markdown(f"**{section['rubrique']} — {len(section['records'])} résultat(s)**")
+                    st.dataframe(pd.DataFrame(section["records"]), use_container_width=True, hide_index=True)
+                st.session_state.ai_assistant_history.append({"role": "assistant", "content": answer, "full_results": full_results})
             except Exception as exc:
                 error_message = f"Je n’ai pas pu répondre : {exc}"
                 st.session_state.ai_assistant_history.append({"role": "assistant", "content": error_message})
@@ -4307,4 +4376,5 @@ elif page == "📊 Rapports & exports":
     render_reports()
 
 st.caption("ISRA • CRA — IST et Communication | Organisation : Communication • Documentations (Catalogue documentaire unifié, Consultations, Personnes, Prêts et retours) • Résultats scientifiques (publications et notes) | Formats : PDF • Excel • CSV")
+
 
