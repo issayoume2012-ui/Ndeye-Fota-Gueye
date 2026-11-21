@@ -2397,7 +2397,8 @@ def _assistant_search_site(question):
         "visualiser", "représentation", "representation", "progression", "barre", "barres", "secteur",
         "secteurs", "histogramme", "histogrammes", "mois", "domaine", "domaines", "thématique",
         "thematique", "thématiques", "thematiques", "statut", "type", "types", "catégorie", "categorie",
-        "région", "region", "structure", "plateforme",
+        "région", "region", "structure", "plateforme", "cumul", "cumule", "cumulé", "cumulée",
+        "cumulee", "cumulatif", "cumulative", "cumulées", "cumulees",
     }
     hints = {
         "📣 Communication": ("activité", "activite", "communication", "média", "media", "audiovisuel", "presse", "événement", "evenement", "format", "participant", "preuve", "justificatif"),
@@ -2542,7 +2543,8 @@ def _assistant_wants_analysis(question):
         "analyse", "analyser", "analysez", "évolution", "evolution", "tendance", "tendances",
         "comparer", "compare", "comparaison", "répartition", "repartition", "graphique",
         "graphe", "schéma", "schema", "diagramme", "courbe", "visualise", "visualiser",
-        "représentation", "representation", "statistique", "statistiques", "progression",
+        "représentation", "representation", "statistique", "statistiques", "progression", "cumul",
+        "cumule", "cumulé", "cumulée", "cumulee", "cumulatif", "cumulative", "cumulées", "cumulees",
     )
     if any(term in question_lower for term in analysis_terms):
         return True
@@ -2551,6 +2553,12 @@ def _assistant_wants_analysis(question):
         "par statut", "par catégorie", "par categorie", "par structure", "par plateforme",
     )
     return any(phrase in question_lower for phrase in group_phrases)
+
+
+def _assistant_wants_comparison(question):
+    question_lower = question.lower()
+    terms = ("compare", "comparer", "comparaison", "comparatif", "cumul", "cumulé", "cumulée", "cumule", "cumulatif", "cumulative")
+    return any(term in question_lower for term in terms)
 
 
 def _assistant_build_analysis_context(context):
@@ -2615,6 +2623,144 @@ def _assistant_render_count_results(results, question, key_suffix):
         st.bar_chart(chart, use_container_width=True)
 
 
+def _assistant_render_comparison_chart(sections, count_results, question, key_suffix):
+    """Compare plusieurs rubriques et peut tracer leur cumul progressif."""
+    usable_sections = [section for section in sections or [] if section.get("records")]
+    count_mode = bool(count_results)
+    if count_mode:
+        rubric_names = [item.get("rubrique", "Rubrique") for item in count_results]
+    else:
+        rubric_names = [section.get("rubrique", "Rubrique") for section in usable_sections]
+    if not rubric_names:
+        return
+
+    default_open = _assistant_wants_comparison(question)
+    if not st.checkbox(
+        "Comparer des rubriques ou afficher un cumul progressif",
+        value=default_open,
+        key=f"fota_comparison_toggle_{key_suffix}",
+    ):
+        return
+
+    selected_rubrics = st.multiselect(
+        "Rubriques à comparer",
+        options=rubric_names,
+        default=rubric_names,
+        key=f"fota_comparison_rubrics_{key_suffix}",
+    )
+    if not selected_rubrics:
+        st.info("Sélectionnez au moins une rubrique.")
+        return
+
+    if count_mode:
+        comparison = pd.DataFrame([
+            {"Rubrique": item.get("rubrique", "Rubrique"), "Valeur": int(item.get("total_enregistrements") or 0)}
+            for item in count_results if item.get("rubrique") in selected_rubrics
+        ]).set_index("Rubrique")
+        metric_label = "Nombre d’enregistrements"
+        group_field = None
+        time_group_selected = False
+    else:
+        selected_sections = [section for section in usable_sections if section.get("rubrique") in selected_rubrics]
+        frames_by_rubric = {section["rubrique"]: pd.DataFrame(section["records"]) for section in selected_sections}
+        numeric_excluded = {"id", "person_id", "activity_id", "item_id", "valorization_id", "researcher_id", "annee"}
+        common_columns = set.intersection(*(set(frame.columns) for frame in frames_by_rubric.values())) if frames_by_rubric else set()
+        common_numeric = []
+        for column in sorted(common_columns):
+            if str(column).lower() in numeric_excluded:
+                continue
+            if all(pd.to_numeric(frame[column], errors="coerce").notna().any() for frame in frames_by_rubric.values()):
+                common_numeric.append(column)
+
+        metric_options = ["Nombre d’enregistrements"] + common_numeric
+        metric_label = st.selectbox("Mesure à comparer", metric_options, key=f"fota_comparison_metric_{key_suffix}")
+        allowed_dimensions = {
+            "type_document", "type_publication", "type_resultat", "type_activite", "type_action",
+            "type_valorisation", "domaine", "thematique", "statut", "categorie", "region",
+            "structure", "plateforme", "support", "format_document",
+        }
+        common_dimensions = [column for column in sorted(common_columns) if str(column).lower() in allowed_dimensions and column not in common_numeric]
+        time_dimensions = [column for column in common_dimensions if str(column).lower().startswith("date_") or str(column).lower().endswith(("_date", "_at"))]
+        if "annee" in common_columns:
+            time_dimensions.insert(0, "annee")
+        grouping_options = ["Rubrique uniquement"] + list(dict.fromkeys(time_dimensions + common_dimensions))
+        group_field = st.selectbox("Comparer par période ou catégorie", grouping_options, key=f"fota_comparison_group_{key_suffix}")
+        time_group_selected = group_field in time_dimensions
+        granularity = "Année"
+        if group_field in time_dimensions and group_field != "annee":
+            granularity = st.selectbox(
+                "Granularité temporelle",
+                ["Année", "Mois"],
+                index=1 if "par mois" in question.lower() else 0,
+                key=f"fota_comparison_granularity_{key_suffix}",
+            )
+
+        def comparison_groups(frame):
+            values = frame[group_field]
+            if group_field == "annee":
+                return pd.to_numeric(values, errors="coerce").astype("Int64").astype("string").fillna("Non renseigné")
+            if group_field in time_dimensions:
+                parsed = pd.to_datetime(values, errors="coerce")
+                if granularity == "Mois":
+                    periods = parsed.dt.to_period("M").astype("string")
+                else:
+                    periods = parsed.dt.year.astype("Int64").astype("string")
+                return periods.where(parsed.notna(), "Non renseigné")
+            return values.fillna("Non renseigné").astype(str)
+
+        aggregated = []
+        for rubric, frame in frames_by_rubric.items():
+            if metric_label == "Nombre d’enregistrements":
+                if group_field == "Rubrique uniquement":
+                    aggregated.append({"Rubrique": rubric, "Groupe": "Total", "Valeur": int(len(frame))})
+                    continue
+                values = comparison_groups(frame)
+                grouped = values.value_counts(dropna=False)
+            else:
+                numeric = pd.to_numeric(frame[metric_label], errors="coerce")
+                if group_field == "Rubrique uniquement":
+                    value = float(numeric.sum()) if numeric.notna().any() else 0
+                    aggregated.append({"Rubrique": rubric, "Groupe": "Total", "Valeur": value})
+                    continue
+                values = comparison_groups(frame)
+                grouped = pd.DataFrame({"groupe": values, "valeur": numeric}).groupby("groupe")["valeur"].sum(min_count=1)
+            for group_value, value in grouped.items():
+                aggregated.append({"Rubrique": rubric, "Groupe": str(group_value), "Valeur": float(value)})
+        chart_data = pd.DataFrame(aggregated)
+        if chart_data.empty:
+            st.info("Aucune valeur commune exploitable pour cette comparaison.")
+            return
+        if group_field == "Rubrique uniquement":
+            comparison = chart_data.set_index("Rubrique")[["Valeur"]]
+        else:
+            comparison = chart_data.pivot_table(index="Groupe", columns="Rubrique", values="Valeur", aggfunc="sum", fill_value=0)
+
+    if comparison.empty:
+        st.info("Aucune donnée sélectionnée pour ce schéma.")
+        return
+    cumulative = st.checkbox(
+        "Afficher les valeurs cumulées",
+        value=_assistant_wants_comparison(question) and any(term in question.lower() for term in ("cumul", "cumulé", "cumulée", "cumule", "cumulative")),
+        key=f"fota_comparison_cumulative_{key_suffix}",
+    )
+    if cumulative and group_field != "Rubrique uniquement" and not count_mode:
+        comparison = comparison.cumsum()
+    if cumulative and (group_field == "Rubrique uniquement" or count_mode):
+        comparison = comparison.cumsum()
+    st.caption(f"{metric_label} — agrégation calculée sur toutes les lignes affichées.")
+    default_chart = "Courbes comparatives" if cumulative or time_group_selected else "Barres comparatives"
+    chart_type = st.selectbox(
+        "Type de comparaison",
+        ["Barres comparatives", "Courbes comparatives"],
+        index=["Barres comparatives", "Courbes comparatives"].index(default_chart),
+        key=f"fota_comparison_chart_type_{key_suffix}",
+    )
+    if chart_type == "Courbes comparatives":
+        st.line_chart(comparison, use_container_width=True)
+    else:
+        st.bar_chart(comparison, use_container_width=True)
+
+
 def _assistant_render_analysis_chart(section, key_suffix):
     records = section.get("records") or []
     if not records:
@@ -2622,7 +2768,7 @@ def _assistant_render_analysis_chart(section, key_suffix):
     question = section.get("question", "")
     show_chart = st.checkbox(
         "Créer un schéma / graphique à partir de ces données",
-        value=_assistant_wants_analysis(question),
+        value=_assistant_wants_analysis(question) and not _assistant_wants_comparison(question),
         key=f"fota_analysis_chart_toggle_{key_suffix}_{section.get('table')}",
     )
     if not show_chart:
@@ -2864,6 +3010,12 @@ def render_ai_assistant():
                     message.get("question", ""),
                     f"history_{len(st.session_state.ai_assistant_history)}",
                 )
+            _assistant_render_comparison_chart(
+                message.get("full_results", []),
+                message.get("count_results", []),
+                message.get("question", ""),
+                f"history_{len(st.session_state.ai_assistant_history)}",
+            )
 
     # Le formulaire reste hors du bloc de traitement pour apparaître à chaque rendu.
     with st.form("fota_gueye_chat_form", clear_on_submit=True):
@@ -2925,6 +3077,7 @@ def render_ai_assistant():
                     _assistant_render_result_section(section, f"current_{index}")
                 if count_results:
                     _assistant_render_count_results(count_results, question, "current")
+                _assistant_render_comparison_chart(full_results, count_results, question, "current")
                 st.session_state.ai_assistant_history.append({"role": "assistant", "content": answer, "full_results": full_results, "count_results": count_results, "question": question})
             except Exception as exc:
                 error_message = f"Je n’ai pas pu répondre : {exc}"
