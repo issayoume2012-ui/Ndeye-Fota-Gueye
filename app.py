@@ -2324,13 +2324,32 @@ def _assistant_json_value(value, max_length=1200):
 def _assistant_wants_all(question):
     question_lower = question.lower()
     return any(token in question_lower for token in (
-    explicit = any(token in question_lower for token in (
         "toutes les infos", "toutes les informations", "toutes les données", "toutes les donnees",
         "tous les résultats", "tous les resultats", "liste complète", "liste complete",
         "intégralité", "integralite", "sans exception", "tout afficher", "tout sortir",
-        "tout le site", "tout le système", "tout le systeme",
     ))
-    return explicit or bool(re.search(r"\b(tous|toutes)\b", question_lower))
+    complete_phrases = [
+        "toutes les infos",
+        "toutes les informations",
+        "toutes les données",
+        "toutes les donnees",
+        "tous les résultats",
+        "tous les resultats",
+        "liste complète",
+        "liste complete",
+        "intégralité",
+        "integralite",
+        "sans exception",
+        "tout afficher",
+        "tout sortir",
+        "tout le site",
+        "tout le système",
+        "tout le systeme",
+    ]
+    for phrase in complete_phrases:
+        if phrase in question_lower:
+            return True
+    return re.search(r"\b(tous|toutes)\b", question_lower) is not None
 
 
 @st.cache_data(ttl=300, show_spinner=False)
