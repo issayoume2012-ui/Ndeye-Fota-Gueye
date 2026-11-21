@@ -2515,11 +2515,12 @@ def _assistant_search_site(question):
                 record = {}
             item["extraits"].append({
                 k: _assistant_json_value(v, max_length=None if complete_request else 1200)
-            clean_record = {
-                k: _assistant_json_value(v, max_length=None)
                 for k, v in record.items() if v not in (None, "")
             })
-            }
+            clean_record = {}
+            for key, value in record.items():
+                if value is not None and value != "":
+                    clean_record[key] = _assistant_json_value(value, max_length=None)
             reference = str(clean_record.get("reference") or "").strip()
             doi_match = re.search(r"(?:https?://(?:dx\.)?doi\.org/|doi:\s*)?(10\.\d{4,9}/[^\s]+)", reference, re.IGNORECASE)
             if doi_match:
