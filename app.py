@@ -3650,26 +3650,30 @@ def render_documentations():
     loan_count=st.number_input("Nombre de prêts à ajouter",min_value=0,value=0,step=1,key="doc_loan_count")
     with st.form("documentation_complete_form"):
         mode=st.radio("Document concerné",["Choisir dans le catalogue existant","Créer une nouvelle fiche documentaire"],horizontal=True,key="doc_item_mode")
-        selected_item=st.selectbox("Document du catalogue",list(item_options),key="doc_existing_item") if mode.startswith("Choisir") and item_options else None
+        selected_item=st.selectbox("📚 Document du catalogue",list(item_options),key="doc_existing_item") if mode.startswith("Choisir") and item_options else None
         if mode.startswith("Choisir") and not item_options:
             st.info("Le catalogue est vide : choisissez « Créer une nouvelle fiche documentaire ».")
-        st.markdown("### Informations du document")
-        c1,c2,c3=st.columns(3)
-        titre=c1.text_input("Titre du document *",key="doc_new_title"); auteurs=c2.text_input("Auteur(s)",key="doc_new_authors"); annee=c3.number_input("Année",1900,2100,value=date.today().year,key="doc_new_year")
-        c1,c2,c3=st.columns(3)
-        type_doc=c1.selectbox("Type",["Livre","Article scientifique","Rapport","Mémoire","Thèse","Document technique","Publication scientifique","Brochure","Revue","Autre"],key="doc_new_type")
-        domaine=c2.text_input("Domaine",key="doc_new_domain"); thematique=c3.text_input("Thématique",key="doc_new_theme")
-        c1,c2,c3=st.columns(3)
-        inventaire=c1.text_input("N° inventaire",key="doc_new_inventory"); cote=c2.text_input("Cote",key="doc_new_cote"); isbn=c3.text_input("ISBN / référence",key="doc_new_isbn")
-        c1,c2,c3=st.columns(3)
-        editeur=c1.text_input("Éditeur",key="doc_new_publisher"); localisation=c2.text_input("Localisation",key="doc_new_location"); keywords=c3.text_input("Mots-clés",key="doc_new_keywords")
-        c1,c2=st.columns(2)
-        exemplaires=c1.number_input("Nombre d’exemplaires",1,10000,1,key="doc_new_copies"); disponibles=c2.number_input("Exemplaires disponibles",0,10000,1,key="doc_new_available")
-        c1,c2=st.columns(2)
-        etat=c1.selectbox("État",["Bon","Moyen","À restaurer","Endommagé"],key="doc_new_state"); format_doc=c2.selectbox("Format",["Papier","Numérique","Papier + numérique"],key="doc_new_format")
-        resume=st.text_area("Résumé / description",key="doc_new_summary")
-        lien=drive_link_input("Lien du document",key="documentation_complete_link")
-        observations_doc=st.text_area("Observations sur le document",key="doc_new_notes")
+        # Les champs de création restent repliés et ne s'affichent que pour un nouveau document.
+        titre=auteurs=annee=type_doc=domaine=thematique=inventaire=cote=isbn=editeur=localisation=keywords=exemplaires=disponibles=etat=format_doc=resume=lien=observations_doc=None
+        if mode.startswith("Créer"):
+            with st.expander("➕ Détails du nouveau document — remplir la fiche",expanded=True):
+                st.markdown("### Informations du document")
+                c1,c2,c3=st.columns(3)
+                titre=c1.text_input("Titre du document *",key="doc_new_title"); auteurs=c2.text_input("Auteur(s)",key="doc_new_authors"); annee=c3.number_input("Année",1900,2100,value=date.today().year,key="doc_new_year")
+                c1,c2,c3=st.columns(3)
+                type_doc=c1.selectbox("Type",["Livre","Article scientifique","Rapport","Mémoire","Thèse","Document technique","Publication scientifique","Brochure","Revue","Autre"],key="doc_new_type")
+                domaine=c2.text_input("Domaine",key="doc_new_domain"); thematique=c3.text_input("Thématique",key="doc_new_theme")
+                c1,c2,c3=st.columns(3)
+                inventaire=c1.text_input("N° inventaire",key="doc_new_inventory"); cote=c2.text_input("Cote",key="doc_new_cote"); isbn=c3.text_input("ISBN / référence",key="doc_new_isbn")
+                c1,c2,c3=st.columns(3)
+                editeur=c1.text_input("Éditeur",key="doc_new_publisher"); localisation=c2.text_input("Localisation",key="doc_new_location"); keywords=c3.text_input("Mots-clés",key="doc_new_keywords")
+                c1,c2=st.columns(2)
+                exemplaires=c1.number_input("Nombre d’exemplaires",1,10000,1,key="doc_new_copies"); disponibles=c2.number_input("Exemplaires disponibles",0,10000,1,key="doc_new_available")
+                c1,c2=st.columns(2)
+                etat=c1.selectbox("État",["Bon","Moyen","À restaurer","Endommagé"],key="doc_new_state"); format_doc=c2.selectbox("Format",["Papier","Numérique","Papier + numérique"],key="doc_new_format")
+                resume=st.text_area("Résumé / description",key="doc_new_summary")
+                lien=drive_link_input("Lien du document",key="documentation_complete_link")
+                observations_doc=st.text_area("Observations sur le document",key="doc_new_notes")
         consultation_values=[]
         for i in range(int(consultation_count)):
             n=i+1
@@ -3697,10 +3701,10 @@ def render_documentations():
     if save:
         existing_id=item_options.get(selected_item) if selected_item else None
         creating=mode.startswith("Créer") or not existing_id
-        available_now=int(disponibles) if creating else int(items.loc[items.id==existing_id,"disponibles"].iloc[0] or 0)
+        available_now=int(disponibles or 0) if creating else int(items.loc[items.id==existing_id,"disponibles"].iloc[0] or 0)
         invalid_due=any(r["due"]<r["date"] for r in loan_values)
         if creating and not titre.strip(): st.error("Le titre du nouveau document est obligatoire.")
-        elif creating and disponibles>exemplaires: st.error("Les exemplaires disponibles ne peuvent pas dépasser le nombre total.")
+        elif creating and int(disponibles or 0)>int(exemplaires or 0): st.error("Les exemplaires disponibles ne peuvent pas dépasser le nombre total.")
         elif sum(1 for r in loan_values if r["person"]!="—" or r["name"].strip())>available_now: st.error(f"Stock insuffisant : {available_now} exemplaire(s) disponible(s) pour {sum(1 for r in loan_values if r['person']!='—' or r['name'].strip())} prêt(s) valide(s).")
         elif invalid_due: st.error("Chaque date de retour prévue doit être postérieure ou égale à la date du prêt.")
         else:
