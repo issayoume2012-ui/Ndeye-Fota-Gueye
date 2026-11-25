@@ -3648,8 +3648,10 @@ def render_documentations():
     item_options={f"{r.titre} — {r.auteurs or 'Auteur non précisé'} ({r.annee or 'année non précisée'}) — ID {r.id}":int(r.id) for r in items.itertuples()}
     consultation_count=st.number_input("Nombre de consultations à ajouter",min_value=0,value=0,step=1,key="doc_consultation_count")
     loan_count=st.number_input("Nombre de prêts à ajouter",min_value=0,value=0,step=1,key="doc_loan_count")
+    # Le choix de mode doit rester hors du formulaire Streamlit : ainsi, sélectionner
+    # « Créer » déclenche immédiatement un rerun et affiche les champs du document.
+    mode=st.radio("Document concerné",["Choisir dans le catalogue existant","Créer une nouvelle fiche documentaire"],horizontal=True,key="doc_item_mode")
     with st.form("documentation_complete_form"):
-        mode=st.radio("Document concerné",["Choisir dans le catalogue existant","Créer une nouvelle fiche documentaire"],horizontal=True,key="doc_item_mode")
         selected_item=st.selectbox("📚 Document du catalogue",list(item_options),key="doc_existing_item") if mode.startswith("Choisir") and item_options else None
         if mode.startswith("Choisir") and not item_options:
             st.info("Le catalogue est vide : choisissez « Créer une nouvelle fiche documentaire ».")
