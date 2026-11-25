@@ -3713,9 +3713,13 @@ def render_documentations():
                 if row["name"].strip():
                     parts=row["name"].strip().split(" ",1)
                     person_id=q("INSERT INTO people(nom,prenom,fonction,email,telephone,localite) VALUES(?,?,?,?,?,?) RETURNING id",(parts[0],parts[1] if len(parts)>1 else "",row["function"],row["email"],row["phone"],row["origin"]))
-                if person_id:
-                    q("INSERT INTO consultations(person_id,item_id,date_consultation,type_consultation,observations) VALUES(?,?,?,?,?)",(person_id,item_id,str(row["date"]),"Sur place",""))
-                else: st.warning("Une consultation sans identité valide a été ignorée.")
+                # Les consultations conservent aussi les coordonnées du visiteur dans leurs champs dédiés,
+                # même si aucun profil people n'a été créé/sélectionné.
+                visitor_name = row["name"].strip()
+                if not visitor_name and person_id:
+                    visitor_name = next((label.split(" (ID ")[0] for label,pid in person_options.items() if pid==person_id), "")
+                q("INSERT INTO consultations(person_id,item_id,date_consultation,type_consultation,observations,visitor_name,visitor_contact,visitor_email,visitor_structure,visitor_categorie) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                  (person_id,item_id,str(row["date"]),"Sur place","",visitor_name or None,row["phone"] or None,row["email"] or None,row["origin"] or None,row["function"] or None))
             for row in loan_values:
                 person_id=person_options.get(row["person"])
                 if row["name"].strip():
@@ -3732,7 +3736,17 @@ def render_documentations():
     if items.empty:
         st.info("Aucune fiche documentaire enregistrée.")
         return
-    choices={f"{r.titre} — {r.auteurs or 'Auteur non précisé'} ({r.annee or 'année non précisée'}) — ID {r.id}":int(r.id) for r in items.itertuples()}
+    catalogue_search=st.text_input("🔎 Rechercher dans le catalogue (titre, auteur, année, type)",key="documentation_catalogue_search")
+    if catalogue_search.strip():
+        mask=items.astype(str).apply(lambda col: col.str.contains(catalogue_search.strip(),case=False,na=False)).any(axis=1)
+        items_view=items.loc[mask]
+    else:
+        items_view=items
+    choices={f"{r.titre} — {r.auteurs or 'Auteur non précisé'} ({r.annee or 'année non précisée'}) — ID {r.id}":int(r.id) for r in items_view.itertuples()}
+    if not choices:
+        st.info("Aucun document ne correspond à cette recherche.")
+        st.dataframe(items,use_container_width=True,hide_index=True,column_config={"lien":st.column_config.LinkColumn("Lien",display_text="Ouvrir ↗")})
+        return
     selected=st.selectbox("Consulter une fiche complète",list(choices),key="documentation_complete_selector")
     item_id=choices[selected]
     item=df("SELECT * FROM library_items WHERE id=?",(item_id,)).iloc[0].to_dict()
