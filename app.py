@@ -3008,34 +3008,70 @@ def render_ai_assistant():
     if not _assistant_gemini_key():
         st.warning("Gemini n’est pas encore configuré. Créez une clé dans Google AI Studio, puis ajoutez-la aux secrets Streamlit sous le nom GEMINI_API_KEY.")
 
-    st.caption("Recherche complète dans les données métiers du site.")
+    st.caption("Recherche dans les données métiers, analyses, comparaisons et rédaction de rapports.")
     st.session_state.setdefault("ai_assistant_history", [])
 
-    for message in st.session_state.ai_assistant_history:
+    # Les clés Streamlit doivent être uniques pour chaque message ET chaque
+    # section. L'ancienne clé dépendait seulement de la longueur de l'historique,
+    # ce qui provoquait StreamlitDuplicateElementKey dès qu'il y avait plusieurs
+    # réponses téléchargeables ou plusieurs graphiques dans l'historique.
+    history = st.session_state.ai_assistant_history
+    for message_index, message in enumerate(history):
+        message_key = f"history_{message_index}"
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
             if message["role"] == "assistant" and len(str(message.get("content", ""))) > 250:
                 st.download_button(
                     "📄 Télécharger cette réponse / ce rapport",
                     data=str(message.get("content", "")),
-                    file_name=f"Fota_Gueye_rapport_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
+                    file_name=f"Fota_Gueye_rapport_{message_index + 1}_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
                     mime="text/markdown",
-                    key=f"fota_download_{len(st.session_state.ai_assistant_history)}_{hash(str(message.get('content',''))) % 100000}",
+                    key=f"fota_download_{message_index}",
                 )
-            for index, section in enumerate(message.get("full_results", [])):
-                _assistant_render_result_section(section, f"history_{index}_{len(st.session_state.ai_assistant_history)}")
+            for section_index, section in enumerate(message.get("full_results", [])):
+                _assistant_render_result_section(section, f"{message_key}_section_{section_index}")
             if message.get("count_results"):
                 _assistant_render_count_results(
                     message["count_results"],
                     message.get("question", ""),
-                    f"history_{len(st.session_state.ai_assistant_history)}",
+                    message_key,
                 )
             _assistant_render_comparison_chart(
                 message.get("full_results", []),
                 message.get("count_results", []),
                 message.get("question", ""),
-                f"history_{len(st.session_state.ai_assistant_history)}",
+                message_key,
             )
+
+    if history:
+        conversation_export = "\n\n".join(
+            ("Vous" if item.get("role") == "user" else "Fota Gueye") + ":\n" + str(item.get("content", ""))
+            for item in history
+        )
+        export_col, refresh_col = st.columns(2)
+        export_col.download_button(
+            "📚 Exporter toute la conversation",
+            data=conversation_export,
+            file_name=f"Fota_Gueye_conversation_{datetime.now().strftime('%Y%m%d_%H%M')}.md",
+            mime="text/markdown",
+            key="fota_export_entire_conversation",
+            use_container_width=True,
+        )
+        if refresh_col.button("🔄 Actualiser les données", key="fota_refresh_data", use_container_width=True):
+            _assistant_search_site.clear()
+            _assistant_db_schema.clear()
+            st.rerun()
+
+    # Exemples de requêtes pour rendre les capacités plus faciles à découvrir.
+    with st.expander("💡 Exemples de demandes utiles", expanded=False):
+        st.markdown(
+            "- **Recherche :** Retrouve les publications sur [thème] depuis 2022.\n"
+            "- **Statistiques :** Combien d’activités ont été enregistrées par année ?\n"
+            "- **Analyse :** Analyse l’évolution des publications et explique les tendances.\n"
+            "- **Comparaison :** Compare les activités de communication et les publications scientifiques.\n"
+            "- **Rapport :** Rédige un bilan professionnel des activités du trimestre avec chiffres et recommandations.\n"
+            "- **Données :** Affiche toutes les fiches correspondant à [nom, projet ou mot-clé]."
+        )
 
     # Le formulaire reste hors du bloc de traitement pour apparaître à chaque rendu.
     with st.form("fota_gueye_chat_form", clear_on_submit=True):
