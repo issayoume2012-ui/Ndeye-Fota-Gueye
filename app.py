@@ -504,6 +504,14 @@ def init_db():
             visitor_email TEXT,
             visitor_lien TEXT
         );
+        -- Migration des anciennes bases : les CREATE TABLE IF NOT EXISTS
+        -- ne modifient pas une table consultations déjà existante.
+        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS visitor_name TEXT;
+        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS visitor_structure TEXT;
+        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS visitor_categorie TEXT;
+        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS visitor_contact TEXT;
+        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS visitor_email TEXT;
+        ALTER TABLE consultations ADD COLUMN IF NOT EXISTS visitor_lien TEXT;
         CREATE TABLE IF NOT EXISTS loans (
             id BIGSERIAL PRIMARY KEY,
             person_id BIGINT REFERENCES people(id) ON DELETE SET NULL,
