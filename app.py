@@ -2907,7 +2907,7 @@ def _ask_gemini(question, context, history):
     else:
         coverage_instruction = "Les lignes fournies proviennent de l’ensemble des correspondances de la base pour cette question. Cite les rubriques et les liens disponibles. "
     prompt = (
-        "Tu es Fota Gueye, assistante de recherche du site interne CRA/ISRA. Réponds en français, directement, clairement et uniquement à partir du contexte fourni. "
+        "Tu es Fota Gueye, assistante interactive de recherche du site interne CRA/ISRA. Réponds dans la langue utilisée par la personne; si elle demande le wolof, réponds en wolof naturel et adapté, et si utile ajoute une courte précision en français. Réponds directement, clairement et uniquement à partir du contexte fourni. "
         "Les nombres calculés par la base sont fiables. Utilise les totaux exacts pour les questions générales de décompte, et les correspondances filtrées lorsqu'une année ou un terme précis est demandé. "
         "Ne déduis jamais un total à partir d'un nombre partiel de lignes. " + coverage_instruction +
         "Pour les questions de recherche, croise les rubriques pertinentes au lieu de répondre à partir d'un seul extrait. Si le contexte est vide, indique seulement qu'aucun enregistrement pertinent n'a été trouvé pour cette question; ne prétends jamais que toutes les données du site sont vides. Si les données ne suffisent pas, demande une précision sans inventer. "
@@ -3626,125 +3626,112 @@ def render_communication():
     render_record_manager("📣 Communication")
 
 def render_documentations():
-    """Une seule fiche document avec le nombre choisi de consultations et de prêts."""
+    """Catalogue documentaire relié aux consultations et aux prêts."""
     st.header("📚 Documentations")
-    st.caption("Décrivez la ressource, indiquez le nombre de consultations et de prêts à enregistrer, puis remplissez leurs détails dans la même fiche.")
-    st.markdown('<div class="section-banner"><span>UNE SEULE FICHE</span><strong>Document + consultations + prêts</strong></div>',unsafe_allow_html=True)
-    consultation_count=st.number_input("Nombre de consultations à ajouter",min_value=0,value=0,step=1,key="doc_consultation_count")
-    loan_count=st.number_input("Nombre de prêts à ajouter",min_value=0,value=0,step=1,key="doc_loan_count")
+    st.caption("Associez chaque consultation ou prêt à un document déjà catalogué, ou créez une nouvelle fiche documentaire.")
+    st.markdown('<div class="section-banner"><span>CATALOGUE & SUIVI</span><strong>Documents • Consultations • Emprunts • Retours</strong></div>', unsafe_allow_html=True)
+    items=df("SELECT id,titre,auteurs,annee,type_document,disponibles FROM library_items ORDER BY titre")
     people=df("SELECT id,nom,prenom FROM people ORDER BY nom,prenom")
     person_options={f"{r.nom} {r.prenom or ''} (ID {r.id})":int(r.id) for r in people.itertuples()}
+    item_options={f"{r.titre} — {r.auteurs or 'Auteur non précisé'} ({r.annee or 'année non précisée'}) — ID {r.id}":int(r.id) for r in items.itertuples()}
+    consultation_count=st.number_input("Nombre de consultations à ajouter",min_value=0,value=0,step=1,key="doc_consultation_count")
+    loan_count=st.number_input("Nombre de prêts à ajouter",min_value=0,value=0,step=1,key="doc_loan_count")
     with st.form("documentation_complete_form"):
-        st.markdown("### 1. Informations sur le document")
+        mode=st.radio("Document concerné",["Choisir dans le catalogue existant","Créer une nouvelle fiche documentaire"],horizontal=True,key="doc_item_mode")
+        selected_item=st.selectbox("Document du catalogue",list(item_options),key="doc_existing_item") if mode.startswith("Choisir") and item_options else None
+        if mode.startswith("Choisir") and not item_options:
+            st.info("Le catalogue est vide : choisissez « Créer une nouvelle fiche documentaire ».")
+        st.markdown("### Informations du document")
         c1,c2,c3=st.columns(3)
-        titre=c1.text_input("Titre du document *"); auteurs=c2.text_input("Auteur(s)"); annee=c3.number_input("Année",1900,2100,value=date.today().year)
+        titre=c1.text_input("Titre du document *",key="doc_new_title"); auteurs=c2.text_input("Auteur(s)",key="doc_new_authors"); annee=c3.number_input("Année",1900,2100,value=date.today().year,key="doc_new_year")
         c1,c2,c3=st.columns(3)
-        type_doc=c1.selectbox("Type",["Livre","Article scientifique","Rapport","Mémoire","Thèse","Document technique","Publication scientifique","Brochure","Revue","Autre"])
-        domaine=c2.text_input("Domaine"); thematique=c3.text_input("Thématique")
+        type_doc=c1.selectbox("Type",["Livre","Article scientifique","Rapport","Mémoire","Thèse","Document technique","Publication scientifique","Brochure","Revue","Autre"],key="doc_new_type")
+        domaine=c2.text_input("Domaine",key="doc_new_domain"); thematique=c3.text_input("Thématique",key="doc_new_theme")
         c1,c2,c3=st.columns(3)
-        inventaire=c1.text_input("N° inventaire"); cote=c2.text_input("Cote"); isbn=c3.text_input("ISBN / référence")
+        inventaire=c1.text_input("N° inventaire",key="doc_new_inventory"); cote=c2.text_input("Cote",key="doc_new_cote"); isbn=c3.text_input("ISBN / référence",key="doc_new_isbn")
         c1,c2,c3=st.columns(3)
-        editeur=c1.text_input("Éditeur"); localisation=c2.text_input("Localisation"); keywords=c3.text_input("Mots-clés")
+        editeur=c1.text_input("Éditeur",key="doc_new_publisher"); localisation=c2.text_input("Localisation",key="doc_new_location"); keywords=c3.text_input("Mots-clés",key="doc_new_keywords")
         c1,c2=st.columns(2)
-        exemplaires=c1.number_input("Nombre d’exemplaires",1,10000,1); disponibles=c2.number_input("Exemplaires disponibles",0,10000,1)
+        exemplaires=c1.number_input("Nombre d’exemplaires",1,10000,1,key="doc_new_copies"); disponibles=c2.number_input("Exemplaires disponibles",0,10000,1,key="doc_new_available")
         c1,c2=st.columns(2)
-        etat=c1.selectbox("État",["Bon","Moyen","À restaurer","Endommagé"]); format_doc=c2.selectbox("Format",["Papier","Numérique","Papier + numérique"])
-        resume=st.text_area("Résumé / description")
+        etat=c1.selectbox("État",["Bon","Moyen","À restaurer","Endommagé"],key="doc_new_state"); format_doc=c2.selectbox("Format",["Papier","Numérique","Papier + numérique"],key="doc_new_format")
+        resume=st.text_area("Résumé / description",key="doc_new_summary")
         lien=drive_link_input("Lien du document",key="documentation_complete_link")
-        observations_doc=st.text_area("Observations sur le document")
+        observations_doc=st.text_area("Observations sur le document",key="doc_new_notes")
         consultation_values=[]
-        if consultation_count:
-            st.markdown("### 2. Détails des consultations")
-            for i in range(int(consultation_count)):
-                n=i+1
-                with st.container(border=True):
-                    st.markdown(f"#### Consultation {n}")
-                    c1,c2,c3=st.columns(3)
-                    consultation_date=c1.date_input("Date",date.today(),key=f"doc_consult_date_{n}")
-                    person=c2.selectbox("Personne déjà enregistrée",["—"]+list(person_options),key=f"doc_consult_person_{n}")
-                    visitor_name=c3.text_input("Nom si nouvelle personne",key=f"doc_consult_name_{n}")
-                    c1,c2,c3,c4=st.columns(4)
-                    person_function=c1.text_input("Fonction / poste",key=f"doc_consult_function_{n}")
-                    person_email=c2.text_input("E-mail",key=f"doc_consult_email_{n}")
-                    person_phone=c3.text_input("Téléphone",key=f"doc_consult_phone_{n}")
-                    person_origin=c4.text_input("Lieu d’origine",key=f"doc_consult_origin_{n}")
-                    consultation_values.append({"date":consultation_date,"person":person,"name":visitor_name,"function":person_function,"email":person_email,"phone":person_phone,"origin":person_origin})
+        for i in range(int(consultation_count)):
+            n=i+1
+            with st.container(border=True):
+                st.markdown(f"#### Consultation {n}")
+                c1,c2,c3=st.columns(3)
+                d=c1.date_input("Date",date.today(),key=f"doc_consult_date_{n}")
+                person=c2.selectbox("Personne déjà enregistrée",["—"]+list(person_options),key=f"doc_consult_person_{n}")
+                name=c3.text_input("Nom si nouvelle personne",key=f"doc_consult_name_{n}")
+                c1,c2,c3,c4=st.columns(4)
+                function=c1.text_input("Fonction / poste",key=f"doc_consult_function_{n}"); email=c2.text_input("E-mail",key=f"doc_consult_email_{n}"); phone=c3.text_input("Téléphone",key=f"doc_consult_phone_{n}"); origin=c4.text_input("Lieu d’origine",key=f"doc_consult_origin_{n}")
+                consultation_values.append({"date":d,"person":person,"name":name,"function":function,"email":email,"phone":phone,"origin":origin})
         loan_values=[]
-        if loan_count:
-            st.markdown("### 3. Détails des prêts")
-            for i in range(int(loan_count)):
-                n=i+1
-                with st.container(border=True):
-                    st.markdown(f"#### Prêt {n}")
-                    c1,c2,c3=st.columns(3)
-                    loan_date=c1.date_input("Date du prêt",date.today(),key=f"doc_loan_date_{n}")
-                    due_date=c2.date_input("Retour prévu",date.today()+timedelta(days=14),key=f"doc_loan_due_{n}")
-                    person=c3.selectbox("Personne déjà enregistrée",["—"]+list(person_options),key=f"doc_loan_person_{n}")
-                    borrower=st.text_input("Nom si nouvel emprunteur",key=f"doc_loan_name_{n}")
-                    c1,c2,c3,c4=st.columns(4)
-                    person_function=c1.text_input("Fonction / poste",key=f"doc_loan_function_{n}")
-                    person_email=c2.text_input("E-mail",key=f"doc_loan_email_{n}")
-                    person_phone=c3.text_input("Téléphone",key=f"doc_loan_phone_{n}")
-                    person_origin=c4.text_input("Lieu d’origine",key=f"doc_loan_origin_{n}")
-                    loan_values.append({"date":loan_date,"due":due_date,"person":person,"name":borrower,"function":person_function,"email":person_email,"phone":person_phone,"origin":person_origin})
-        save=st.form_submit_button("💾 Enregistrer le document et tous ses suivis",type="primary",use_container_width=True)
+        for i in range(int(loan_count)):
+            n=i+1
+            with st.container(border=True):
+                st.markdown(f"#### Prêt {n}")
+                c1,c2,c3=st.columns(3)
+                d=c1.date_input("Date du prêt",date.today(),key=f"doc_loan_date_{n}"); due=c2.date_input("Retour prévu",date.today()+timedelta(days=14),key=f"doc_loan_due_{n}"); person=c3.selectbox("Personne déjà enregistrée",["—"]+list(person_options),key=f"doc_loan_person_{n}")
+                name=st.text_input("Nom si nouvel emprunteur",key=f"doc_loan_name_{n}")
+                c1,c2,c3,c4=st.columns(4)
+                function=c1.text_input("Fonction / poste",key=f"doc_loan_function_{n}"); email=c2.text_input("E-mail",key=f"doc_loan_email_{n}"); phone=c3.text_input("Téléphone",key=f"doc_loan_phone_{n}"); origin=c4.text_input("Lieu d’origine",key=f"doc_loan_origin_{n}")
+                loan_values.append({"date":d,"due":due,"person":person,"name":name,"function":function,"email":email,"phone":phone,"origin":origin})
+        save=st.form_submit_button("💾 Enregistrer le document et ses suivis",type="primary",use_container_width=True)
     if save:
-        invalid_due=any(row["due"]<row["date"] for row in loan_values)
-        if not titre.strip(): st.error("Le titre du document est obligatoire.")
-        elif disponibles>exemplaires: st.error("Le nombre disponible ne peut pas dépasser le nombre d’exemplaires.")
-        elif len(loan_values)>disponibles: st.error("Le nombre de prêts dépasse les exemplaires disponibles.")
-        elif invalid_due: st.error("Chaque date de retour prévue doit être après la date du prêt.")
+        existing_id=item_options.get(selected_item) if selected_item else None
+        creating=mode.startswith("Créer") or not existing_id
+        available_now=int(disponibles) if creating else int(items.loc[items.id==existing_id,"disponibles"].iloc[0] or 0)
+        invalid_due=any(r["due"]<r["date"] for r in loan_values)
+        if creating and not titre.strip(): st.error("Le titre du nouveau document est obligatoire.")
+        elif creating and disponibles>exemplaires: st.error("Les exemplaires disponibles ne peuvent pas dépasser le nombre total.")
+        elif sum(1 for r in loan_values if r["person"]!="—" or r["name"].strip())>available_now: st.error(f"Stock insuffisant : {available_now} exemplaire(s) disponible(s) pour {sum(1 for r in loan_values if r['person']!='—' or r['name'].strip())} prêt(s) valide(s).")
+        elif invalid_due: st.error("Chaque date de retour prévue doit être postérieure ou égale à la date du prêt.")
         else:
-            item_id=q("INSERT INTO library_items(inventaire,cote,isbn,titre,auteurs,editeur,annee,type_document,domaine,thematique,mots_cles,exemplaires,disponibles,localisation,etat,format_document,resume,lien,observations) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id",(inventaire or None,cote,isbn,titre.strip(),auteurs,editeur,annee,type_doc,domaine,thematique,keywords,exemplaires,disponibles,localisation,etat,format_doc,resume,lien,observations_doc))
+            if creating:
+                item_id=q("INSERT INTO library_items(inventaire,cote,isbn,titre,auteurs,editeur,annee,type_document,domaine,thematique,mots_cles,exemplaires,disponibles,localisation,etat,format_document,resume,lien,observations) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) RETURNING id",(inventaire or None,cote,isbn,titre.strip(),auteurs,editeur,annee,type_doc,domaine,thematique,keywords,exemplaires,disponibles,localisation,etat,format_doc,resume,lien,observations_doc))
+            else:
+                item_id=existing_id
             for row in consultation_values:
                 person_id=person_options.get(row["person"])
                 if row["name"].strip():
                     parts=row["name"].strip().split(" ",1)
                     person_id=q("INSERT INTO people(nom,prenom,fonction,email,telephone,localite) VALUES(?,?,?,?,?,?) RETURNING id",(parts[0],parts[1] if len(parts)>1 else "",row["function"],row["email"],row["phone"],row["origin"]))
-                q("INSERT INTO consultations(person_id,item_id,date_consultation,type_consultation,observations) VALUES(?,?,?,?,?)",(person_id,item_id,str(row["date"]),"Sur place",""))
+                if person_id:
+                    q("INSERT INTO consultations(person_id,item_id,date_consultation,type_consultation,observations) VALUES(?,?,?,?,?)",(person_id,item_id,str(row["date"]),"Sur place",""))
+                else: st.warning("Une consultation sans identité valide a été ignorée.")
             for row in loan_values:
                 person_id=person_options.get(row["person"])
                 if row["name"].strip():
                     parts=row["name"].strip().split(" ",1)
                     person_id=q("INSERT INTO people(nom,prenom,fonction,email,telephone,localite) VALUES(?,?,?,?,?,?) RETURNING id",(parts[0],parts[1] if len(parts)>1 else "",row["function"],row["email"],row["phone"],row["origin"]))
-                q("INSERT INTO loans(person_id,item_id,date_emprunt,date_retour_prevue,statut,observations) VALUES(?,?,?,?,?,?)",(person_id,item_id,str(row["date"]),str(row["due"]),"En cours",""))
-            if loan_values: q("UPDATE library_items SET disponibles=GREATEST(COALESCE(disponibles,0)-?,0) WHERE id=?",(len(loan_values),item_id))
-            st.success(f"La fiche « {titre} » et ses {len(consultation_values)} consultation(s) / {len(loan_values)} prêt(s) ont été enregistrés ensemble.")
-            st.rerun()
+                if person_id:
+                    q("INSERT INTO loans(person_id,item_id,date_emprunt,date_retour_prevue,statut,observations) VALUES(?,?,?,?,?,?)",(person_id,item_id,str(row["date"]),str(row["due"]),"En cours",""))
+                else: st.warning("Un prêt sans identité d’emprunteur valide a été ignoré.")
+            if loan_values: q("UPDATE library_items SET disponibles=GREATEST(COALESCE(disponibles,0)-?,0) WHERE id=?",(sum(1 for r in loan_values if r["person"]!="—" or r["name"].strip()),item_id))
+            st.success("Document et suivis enregistrés."); st.rerun()
 
-    st.markdown("### Fiches documentaires enregistrées")
-    items=df("SELECT id,titre,auteurs,annee,type_document,disponibles,lien FROM library_items ORDER BY id DESC")
+    st.markdown("### Catalogue documentaire enregistré")
+    items=df("SELECT id,titre,auteurs,annee,type_document,exemplaires,disponibles,lien FROM library_items ORDER BY id DESC")
     if items.empty:
         st.info("Aucune fiche documentaire enregistrée.")
         return
-    choices={f"{r.titre} — {r.auteurs or 'Auteur non précisé'} ({r.annee or 'année non précisée'})":int(r.id) for r in items.itertuples()}
+    choices={f"{r.titre} — {r.auteurs or 'Auteur non précisé'} ({r.annee or 'année non précisée'}) — ID {r.id}":int(r.id) for r in items.itertuples()}
     selected=st.selectbox("Consulter une fiche complète",list(choices),key="documentation_complete_selector")
     item_id=choices[selected]
     item=df("SELECT * FROM library_items WHERE id=?",(item_id,)).iloc[0].to_dict()
-    operations=df("""
-        SELECT 'Consultation' AS operation,c.date_consultation::text AS date,
-               COALESCE(TRIM(COALESCE(p.prenom,'')||' '||COALESCE(p.nom,'')),'Personne non précisée') AS personne,
-               COALESCE(p.fonction,'') AS fonction,COALESCE(p.email,'') AS email,
-               COALESCE(p.telephone,'') AS telephone,COALESCE(p.localite,'') AS lieu_origine,c.observations
-        FROM consultations c LEFT JOIN people p ON p.id=c.person_id WHERE c.item_id=?
-        UNION ALL
-        SELECT 'Prêt',l.date_emprunt::text,
-               COALESCE(TRIM(COALESCE(p.prenom,'')||' '||COALESCE(p.nom,'')),'Personne non précisée'),
-               COALESCE(p.fonction,''),COALESCE(p.email,''),COALESCE(p.telephone,''),COALESCE(p.localite,''),
-               COALESCE(l.statut,'')||' — retour prévu '||l.date_retour_prevue::text||' — '||COALESCE(l.observations,'')
-        FROM loans l LEFT JOIN people p ON p.id=l.person_id WHERE l.item_id=?
-        ORDER BY date DESC
-    """,(item_id,item_id))
+    operations=df("""SELECT 'Consultation' AS operation,c.id,c.date_consultation::text AS date,COALESCE(TRIM(COALESCE(p.prenom,'')||' '||COALESCE(p.nom,'')),'Personne non précisée') AS personne,COALESCE(p.fonction,'') AS fonction,COALESCE(p.email,'') AS email,COALESCE(p.telephone,'') AS telephone,COALESCE(p.localite,'') AS lieu_origine,c.observations FROM consultations c LEFT JOIN people p ON p.id=c.person_id WHERE c.item_id=? UNION ALL SELECT 'Prêt',l.id,l.date_emprunt::text,COALESCE(TRIM(COALESCE(p.prenom,'')||' '||COALESCE(p.nom,'')),'Personne non précisée'),COALESCE(p.fonction,''),COALESCE(p.email,''),COALESCE(p.telephone,''),COALESCE(p.localite,''),COALESCE(l.statut,'')||' — retour prévu '||l.date_retour_prevue::text||' — retour réel '||COALESCE(l.date_retour_reelle::text,'non retourné')||' — '||COALESCE(l.observations,'') FROM loans l LEFT JOIN people p ON p.id=l.person_id WHERE l.item_id=? ORDER BY date DESC""",(item_id,item_id))
     st.markdown(f"#### {item.get('titre')} — {len(operations)} suivi(s)")
     if not operations.empty: st.dataframe(operations,use_container_width=True,hide_index=True)
-    else: st.info("Aucune consultation ni aucun prêt n’est associé à cette fiche.")
+    else: st.info("Aucune consultation ni aucun prêt associé.")
     parent={f"Document — {k}":v for k,v in item.items() if k not in ("id","created_at")}
     children=operations.to_dict(orient="records") if not operations.empty else [{"operation":"Aucun suivi enregistré"}]
-    report=pd.DataFrame([{**parent,**{f"Suivi — {k}":v for k,v in row.items()}} for row in children])
-    export_buttons(report,f"fiche_complete_document_{item_id}",f"Fiche complète document — {item.get('titre')}")
-    st.markdown("### Catalogue documentaire")
+    export_buttons(pd.DataFrame([{**parent,**{f"Suivi — {k}":v for k,v in row.items()}} for row in children]),f"fiche_complete_document_{item_id}",f"Fiche complète document — {item.get('titre')}")
     st.dataframe(items,use_container_width=True,hide_index=True,column_config={"lien":st.column_config.LinkColumn("Lien",display_text="Ouvrir ↗")})
-
 
 def render_visitors():
     st.header("👥 Registre des visiteurs")
@@ -3891,6 +3878,52 @@ def render_profile():
 
     # -----------------------------
 
+def _scientific_record_manager(table, type_column, type_value, key_prefix):
+    """Modification et suppression contrôlées d'une fiche scientifique."""
+    if table not in {"scientific_results", "scientific_publications"}:
+        return
+    if type_value is None:
+        rows=df(f"SELECT id,titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,lien,statut,observations FROM {table} ORDER BY annee DESC,id DESC")
+    else:
+        rows=df(f"SELECT id,titre,auteurs,annee,domaine,projet,resume,mots_cles,public_cible,reference,lien,statut,observations FROM {table} WHERE {type_column}=? ORDER BY annee DESC,id DESC",(type_value,))
+    if rows.empty:
+        return
+    st.markdown("#### ✏️ Modifier ou supprimer une fiche enregistrée")
+    opts={f"{r.titre} — {r.auteurs or 'Auteur non précisé'} ({r.annee or 'année inconnue'}) — ID {r.id}":int(r.id) for r in rows.itertuples()}
+    chosen=st.selectbox("Fiche à gérer",list(opts),key=f"{key_prefix}_manage_select")
+    rid=opts[chosen]
+    record=df(f"SELECT * FROM {table} WHERE id=?",(rid,)).iloc[0].to_dict()
+    with st.form(f"{key_prefix}_edit_form"):
+        c1,c2,c3=st.columns(3)
+        titre=c1.text_input("Titre *",value=record.get("titre") or "",key=f"{key_prefix}_edit_title")
+        auteurs=c2.text_input("Auteur(s)",value=record.get("auteurs") or "",key=f"{key_prefix}_edit_authors")
+        annee=c3.number_input("Année",1900,2100,value=int(record.get("annee") or date.today().year),key=f"{key_prefix}_edit_year")
+        c1,c2,c3=st.columns(3)
+        domaine=c1.text_input("Domaine",value=record.get("domaine") or "",key=f"{key_prefix}_edit_domain")
+        projet=c2.text_input("Projet",value=record.get("projet") or "",key=f"{key_prefix}_edit_project")
+        public=c3.text_input("Public cible",value=record.get("public_cible") or "",key=f"{key_prefix}_edit_public")
+        resume=st.text_area("Résumé",value=record.get("resume") or "",key=f"{key_prefix}_edit_summary")
+        c1,c2,c3=st.columns(3)
+        mots=c1.text_input("Mots-clés",value=record.get("mots_cles") or "",key=f"{key_prefix}_edit_keywords")
+        reference=c2.text_input("Référence / DOI",value=record.get("reference") or "",key=f"{key_prefix}_edit_reference")
+        lien=c3.text_input("Lien",value=record.get("lien") or "",key=f"{key_prefix}_edit_link")
+        statut=st.selectbox("Statut",["Disponible","En préparation","À vérifier","Archivé"],index=["Disponible","En préparation","À vérifier","Archivé"].index(record.get("statut")) if record.get("statut") in ["Disponible","En préparation","À vérifier","Archivé"] else 0,key=f"{key_prefix}_edit_status")
+        observations=st.text_area("Observations",value=record.get("observations") or "",key=f"{key_prefix}_edit_notes")
+        update=st.form_submit_button("💾 Enregistrer les modifications",type="primary")
+    if update:
+        if not titre.strip():
+            st.error("Le titre est obligatoire.")
+        else:
+            q(f"UPDATE {table} SET titre=?,auteurs=?,annee=?,domaine=?,projet=?,resume=?,mots_cles=?,public_cible=?,reference=?,lien=?,statut=?,observations=? WHERE id=?",(titre.strip(),auteurs,annee,domaine,projet,resume,mots,public,reference,lien,statut,observations,rid))
+            st.success("Fiche scientifique mise à jour."); st.rerun()
+    with st.expander("🗑️ Suppression définitive de cette fiche"):
+        st.warning("Cette suppression est définitive. Vérifiez le titre et l'identifiant avant de confirmer.")
+        confirm=st.checkbox(f"Je confirme la suppression définitive de « {record.get('titre')} » (ID {rid}).",key=f"{key_prefix}_delete_confirm")
+        if st.button("Supprimer définitivement",key=f"{key_prefix}_delete_button",type="secondary",disabled=not confirm):
+            q(f"DELETE FROM {table} WHERE id=?",(rid,))
+            st.success("Fiche supprimée définitivement."); st.rerun()
+
+
 def render_scientific_results():
     """Espace Résultats scientifiques organisé en six onglets métier."""
     st.header("🔬 Résultats scientifiques")
@@ -3940,6 +3973,7 @@ def render_scientific_results():
         data=df("SELECT id,type_resultat,titre,auteurs,annee,domaine,projet,reference,statut,lien FROM scientific_results WHERE type_resultat=? ORDER BY annee DESC,id DESC",(label,))
         st.dataframe(data,use_container_width=True,hide_index=True)
         export_buttons(data,f"{label.lower().replace(' ','_')}",label)
+        _scientific_record_manager("scientific_results","type_resultat",label,f"scientific_{label.replace(' ','_')}")
 
     with tab_fiche:
         st.subheader("🧾 Fiches techniques")
@@ -3999,6 +4033,7 @@ def render_scientific_results():
         st.subheader("📋 Registre des publications scientifiques")
         st.dataframe(pubs,use_container_width=True,hide_index=True)
         export_buttons(pubs,"publications_scientifiques","Publications scientifiques CRA/ISRA")
+        _scientific_record_manager("scientific_publications","type_publication",None,"pubist_records")
 
     def render_publication_note(ptype, icon):
         st.subheader(f"{icon} {ptype}")
@@ -4030,6 +4065,7 @@ def render_scientific_results():
         data=df("SELECT id,type_publication,titre,auteurs,annee,domaine,projet,reference,statut,lien FROM scientific_publications WHERE type_publication=? ORDER BY annee DESC,id DESC",(ptype,))
         st.dataframe(data,use_container_width=True,hide_index=True)
         export_buttons(data,ptype.lower().replace(' ','_'),ptype)
+        _scientific_record_manager("scientific_publications","type_publication",ptype,f"publication_{ptype.replace(' ','_')}")
 
     with tab_note_politique:
         render_publication_note("Note politique", "🗒️")
