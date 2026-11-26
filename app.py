@@ -1628,7 +1628,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     Architecture du document :
       01. Synthèse exécutive
       02. Communication
-          2.1 Fiches de communication — activité et compléments réunis
+          2.1 Fiches de communication — activité et actions de communication réunies
       03. Documentations
           3.1 Catalogue documentaire unifié
           3.2 Consultations
@@ -1813,7 +1813,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     ))
 
     kpi_order = [
-        ("Fiches activités + compléments de communication", report_data.get("Activités")),
+        ("Fiches activités + actions de communication", report_data.get("Activités")),
         ("Publications scientifiques", report_data.get("Publications scientifiques — ressources", pd.DataFrame())),
         ("Catalogue documentaire", report_data.get("Catalogue", pd.DataFrame())),
         ("🧾 Fiches techniques", report_data.get("Fiches techniques", pd.DataFrame())),
@@ -1851,7 +1851,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     # Tableau de synthèse des espaces
     synthesis_rows = [
         ["Espace", "Contenu", "Enregistrements"],
-        ["Communication", "Une fiche par activité avec l’ensemble des compléments de communication",
+        ["Communication", "Une fiche par activité avec l’ensemble des actions de communication",
          str(len(report_data.get("Activités", pd.DataFrame())))],
         ["Documentations", "Catalogue documentaire unique, consultations, prêts/retours et personnes",
          str(sum(len(report_data.get(k, pd.DataFrame())) for k in [
@@ -1873,7 +1873,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     # ------------------------------------------------------------
     story.extend(_pdf_section_header(
         "02", "COMMUNICATION",
-        "Une fiche par activité réunit l’activité et l’ensemble de ses compléments de communication.",
+        "Une fiche par activité réunit l’activité et l’ensemble de ses actions de communication.",
         section
     ))
 
@@ -1909,7 +1909,7 @@ def complete_report_pdf(report_data, start=None, end=None, report_profile=None):
     )
 
     communication_sections = [
-        ("2.1", "Fiches de communication — une fiche par activité", "Chaque ligne rassemble l’activité et tous ses compléments rattachés. Les compléments historiques sans activité sont regroupés dans une fiche dédiée.", activities_pdf),
+        ("2.1", "Fiches de communication — une fiche par activité", "Chaque ligne rassemble l’activité et toutes ses actions de communication rattachées. Les actions historiques sans activité sont regroupées dans une fiche dédiée.", activities_pdf),
     ]
 
     for num, title, desc, frame in communication_sections:
@@ -2311,12 +2311,16 @@ def _assistant_question_needs_site_data(question):
         "compare nos", "compare les", "évolution de nos", "evolution de nos",
         "quels sont nos", "quelles sont nos", "nos activités", "nos activites",
         "nos publications", "nos documents", "nos chercheurs", "nos visiteurs",
+        "donne-moi", "donne moi", "montre-moi", "montre moi", "je veux voir",
+        "dans l’application", "dans l'application", "dans notre plateforme",
+        "actions de communication", "action de communication", "actions communication",
     )
     domain_terms = (
         "activité", "activite", "communication", "publication", "scientifique", "document",
         "bibliothèque", "bibliotheque", "visiteur", "consultation", "prêt", "pret", "emprunt",
         "chercheur", "valorisation", "audiovisuel", "presse", "participant", "résultat", "resultat",
         "rapport d'activité", "rapport d’activite", "fiche", "enregistrement",
+        "action de communication", "actions de communication", "média", "media",
     )
     explicit = any(term in text for term in data_actions)
     report_request = any(term in text for term in (
@@ -2404,11 +2408,18 @@ def _assistant_db_schema():
     return schema
 
 
-@st.cache_data(ttl=30, show_spinner=False)
 def _assistant_search_site(question):
-    """Recherche en lecture seule dans l'ensemble des données, réservée aux admins."""
-    if not globals().get("CURRENT_USER", {}).get("is_admin"):
-        raise PermissionError("L’assistant Fota Gueye est réservé aux administrateurs.")
+    """Recherche en lecture seule, limitée aux espaces autorisés de l'utilisateur."""
+    current_user = globals().get("CURRENT_USER", {}) or {}
+    if not current_user:
+        raise PermissionError("Connectez-vous pour utiliser Fota Gueye.")
+    allowed_pages = set(current_user.get("allowed_pages") or [])
+    if current_user.get("is_admin"):
+        allowed_pages.update(AI_SEARCH_SOURCES.keys())
+    else:
+        allowed_pages.discard("⚙️ Administration")
+    if not allowed_pages:
+        raise PermissionError("Aucun espace métier ne vous est attribué pour la recherche.")
     small_talk = re.sub(r"[.!?]+$", "", question.strip().lower()).strip()
     if small_talk in {"bonjour", "salut", "bonsoir", "coucou", "merci", "qui es-tu", "qui es tu", "comment vas-tu", "comment vas tu", "comment ça va", "aide", "help"}:
         return []
@@ -2429,7 +2440,7 @@ def _assistant_search_site(question):
         "evolution", "tendance", "tendances", "comparer", "compare", "comparaison", "répartition",
         "repartition", "graphique", "graphe", "schéma", "schema", "diagramme", "courbe", "visualise",
         "visualiser", "représentation", "representation", "progression", "barre", "barres", "secteur",
-        "secteurs", "histogramme", "histogrammes", "mois", "domaine", "domaines", "thématique",
+        "secteurs", "histogramme", "histogrammes", "mois", "domaine", "domaines", "action", "actions", "communication", "donne-moi", "montre-moi", "thématique",
         "thematique", "thématiques", "thematiques", "statut", "type", "types", "catégorie", "categorie",
         "région", "region", "structure", "plateforme", "cumul", "cumule", "cumulé", "cumulée",
         "cumulee", "cumulatif", "cumulative", "cumulées", "cumulees",
@@ -2448,7 +2459,8 @@ def _assistant_search_site(question):
     complete_request = _assistant_wants_all(question) and not count_request
     relevant_pages = list(AI_SEARCH_SOURCES) if all_site_request else [p for p, words in hints.items() if any(w in question_lower for w in words)]
     if not relevant_pages:
-        relevant_pages = list(AI_SEARCH_SOURCES)
+        relevant_pages = list(allowed_pages)
+    relevant_pages = [page for page in relevant_pages if page in allowed_pages and page in AI_SEARCH_SOURCES]
     topic_words = {w for page in relevant_pages for w in hints.get(page, ()) if w in question_lower}
     terms = [
         term for term in re.findall(r"[\wÀ-ÿ-]{3,}", question_lower)
@@ -2475,10 +2487,11 @@ def _assistant_search_site(question):
                     term_clauses = [f"CAST({col} AS TEXT) ILIKE ?" for col in searchable_columns]
                     clauses.append("(" + " OR ".join(term_clauses) + ")")
                     params.extend([f"%{term}%"] * len(searchable_columns))
-                # Tous les termes utiles doivent correspondre : cela évite de
-                # renvoyer toutes les lignes d'une année lorsque le nom demandé
-                # ne figure pas dans l'enregistrement.
-                where_sql = " AND ".join(clauses)
+                # Une correspondance sur au moins un terme significatif suffit.
+                # Les formulations naturelles contiennent souvent des mots
+                # qui ne figurent pas tels quels dans les fiches ; le AND strict
+                # produisait donc fréquemment des résultats vides.
+                where_sql = " OR ".join(clauses)
                 requested_year = re.search(r"\b(?:19|20)\d{2}\b", question_lower)
                 if requested_year:
                     year_fields = []
@@ -3029,11 +3042,11 @@ def _ask_gemini(question, context, history):
 
 
 def render_ai_assistant():
-    if not CURRENT_USER.get("is_admin"):
+    if not CURRENT_USER:
         return
     st.subheader("🤖 Fota Gueye — votre assistant")
     st.caption("Assistant professionnel CRA/ISRA : expertise métier, recherche dans les données internes, analyses, comparaisons et rédaction de notes et rapports.")
-    st.info("Fota Gueye distingue les données réellement enregistrées des conseils généraux. Les mots de passe, secrets et contenus binaires restent exclus. Les recherches courantes sont limitées aux 100 fiches les plus récentes par rubrique ; demandez explicitement une liste exhaustive pour tout afficher.")
+    st.info("Fota Gueye peut rechercher et croiser les données des espaces métiers, produire des statistiques et préparer des analyses et rapports. Les mots de passe, secrets et contenus binaires restent exclus. Les recherches courantes affichent jusqu’à 100 fiches par rubrique ; demandez une liste exhaustive pour tout afficher.")
     if not _assistant_gemini_key():
         st.warning("Gemini n’est pas encore configuré. Créez une clé dans Google AI Studio, puis ajoutez-la aux secrets Streamlit sous le nom GEMINI_API_KEY.")
 
@@ -3155,12 +3168,27 @@ def render_ai_assistant():
         st.session_state.ai_assistant_history = []
         st.rerun()
 
-    if st.checkbox("🗂️ Ouvrir la gestion des informations", key="fota_manage_open"):
-        st.caption("Choisissez une rubrique et validez explicitement l’ajout ou la modification. Les suppressions, les comptes et les mots de passe ne sont pas accessibles ici.")
-        table_labels = {label: table for groups in AI_SEARCH_SOURCES.values() for label, (table, _) in groups.items() if table in AI_WRITE_SOURCES}
+    can_manage_add = bool(CURRENT_USER.get("is_admin") or CURRENT_USER.get("can_add"))
+    can_manage_edit = bool(CURRENT_USER.get("is_admin") or CURRENT_USER.get("can_edit"))
+    if can_manage_add or can_manage_edit:
+      if st.checkbox("🗂️ Ouvrir la gestion des informations", key="fota_manage_open"):
+        st.caption("Ajoutez ou modifiez uniquement les fiches des espaces qui vous sont attribués. Les comptes, mots de passe et suppressions ne sont pas accessibles ici.")
+        accessible_pages = set(CURRENT_USER.get("allowed_pages") or [])
+        if CURRENT_USER.get("is_admin"):
+            accessible_pages.update(AI_SEARCH_SOURCES.keys())
+        else:
+            accessible_pages.discard("⚙️ Administration")
+        table_labels = {
+            label: table
+            for page_name, groups in AI_SEARCH_SOURCES.items()
+            if page_name in accessible_pages and page_name != "⚙️ Administration"
+            for label, (table, _) in groups.items()
+            if table in AI_WRITE_SOURCES
+        }
         selected_label = st.selectbox("Rubrique", list(table_labels), key="fota_manage_label")
         selected_table = table_labels[selected_label]
-        mode = st.radio("Action", ["Ajouter", "Modifier"], horizontal=True, key="fota_manage_mode")
+        available_modes = (["Ajouter"] if can_manage_add else []) + (["Modifier"] if can_manage_edit else [])
+        mode = st.radio("Action", available_modes, horizontal=True, key="fota_manage_mode")
         record_id = None
         existing = {}
         if mode == "Modifier":
@@ -3285,9 +3313,9 @@ def render_dashboard():
 
     metrics = [
         ("Activités", counts.get("activities", 0)),
+        ("Actions de communication", counts.get("communication_total", 0)),
         ("Participants", counts.get("participants", 0)),
         ("Personnes", counts.get("people", 0)),
-        ("Compléments de communication", counts.get("communication_total", 0)),
         ("📚 Catalogue documentaire total", catalogue_total),
         ("Fonds bibliothèque", library_total),
         ("Ressources documentaires / IST", ist_total),
@@ -3647,8 +3675,8 @@ def render_communication():
             st.success(f"Fiche enregistrée : {title} — {len(actions)} action(s) de communication.")
             st.rerun()
 
-    # Les anciennes activités et leurs compléments restent consultables ici.
-    st.markdown("### Activités et compléments déjà enregistrés")
+    # Les anciennes activités et leurs actions de communication restent consultables ici.
+    st.markdown("### Activités et actions de communication déjà enregistrées")
     saved_activities = df("SELECT id,reference,titre,date_activite,date_fin,type_activite,statut FROM activities ORDER BY date_activite DESC NULLS LAST,id DESC")
     if not saved_activities.empty:
         activity_choices = {
@@ -3679,7 +3707,7 @@ def render_communication():
     else:
         st.info("Aucune activité enregistrée pour le moment.")
 
-    with st.expander("Compléments historiques sans activité rattachée", expanded=False):
+    with st.expander("Actions historiques sans activité rattachée", expanded=False):
         legacy_comm = df("SELECT id,titre,type_action,plateforme,structure,responsable,date_publication,lien,vues,reactions,commentaires,partages,telechargements,observations FROM communications WHERE activity_id IS NULL ORDER BY date_publication DESC NULLS LAST,id DESC")
         legacy_media = df("SELECT id,media_name,media_type,type_intervention,journaliste,personne_interviewee,sujet,date_intervention,lien,observations FROM media WHERE activity_id IS NULL ORDER BY date_intervention DESC NULLS LAST,id DESC")
         legacy_av = df("SELECT id,titre,type_production,theme,responsable,date_production,lien,observations FROM audiovisual WHERE activity_id IS NULL ORDER BY date_production DESC NULLS LAST,id DESC")
@@ -4572,7 +4600,7 @@ def render_reports():
         sort=False,
     )
 
-    # Une ligne de rapport par activité. Tous les compléments rattachés sont
+    # Une ligne de rapport par activité. Tous les actions de communication rattachées sont
     # lisibles dans la même cellule et restent intégralement exportables.
     linked_communications = df("SELECT * FROM communications WHERE activity_id IS NOT NULL ORDER BY id")
     linked_media_all = df("SELECT * FROM media WHERE activity_id IS NOT NULL ORDER BY id")
@@ -4598,8 +4626,8 @@ def render_reports():
         communication_report_rows.append({
             "ID activité": activity_id,
             **activity_fields,
-            "Nombre de compléments": len(child_lines),
-            "Actions et compléments de communication": "\n\n".join(child_lines) if child_lines else "Aucun complément rattaché",
+            "Nombre d’actions de communication": len(child_lines),
+            "Actions de communication": "\n\n".join(child_lines) if child_lines else "Aucune action de communication rattachée",
         })
 
     orphan_lines = []
@@ -4613,9 +4641,9 @@ def render_reports():
     if orphan_lines:
         communication_report_rows.append({
             "ID activité": "",
-            "Activité — titre": "Compléments historiques sans activité rattachée / référentiels",
-            "Nombre de compléments": len(orphan_lines),
-            "Actions et compléments de communication": "\n\n".join(orphan_lines),
+            "Activité — titre": "Actions historiques sans activité rattachée / référentiels",
+            "Nombre d’actions de communication": len(orphan_lines),
+            "Actions de communication": "\n\n".join(orphan_lines),
         })
     communication_activity_report = pd.DataFrame(communication_report_rows)
 
@@ -4643,7 +4671,7 @@ def render_reports():
     st.subheader("📌 Indicateurs de la période")
 
     vals = [
-        ("Communication — fiches activité et compléments", len(communication_activity_report)),
+        ("Communication — fiches activité et actions de communication", len(communication_activity_report)),
         ("Catalogue documentaire", len(catalogue)),
         ("Consultations", len(consultations)),
         ("Prêts", len(loans)),
@@ -4675,8 +4703,8 @@ def render_reports():
         "Médias": media_df,
         "Audiovisuel": av,
         "Formats": formats,
-        "Compléments de communication": communication_unifiee,
-        "Compléments historiques sans rattachement": pd.DataFrame({"Actions conservées": orphan_lines}) if orphan_lines else pd.DataFrame(columns=["Actions conservées"]),
+        "Actions de communication": communication_unifiee,
+        "Actions historiques sans rattachement": pd.DataFrame({"Actions de communication conservées": orphan_lines}) if orphan_lines else pd.DataFrame(columns=["Actions de communication conservées"]),
         "Catalogue": catalogue,
         "Publications scientifiques — ressources": publications_ist,
         "Consultations": consultations,
@@ -4731,8 +4759,8 @@ def render_reports():
         activity_report = pd.DataFrame([{
             "ID activité": activity_id,
             **parent_columns,
-            "Nombre de compléments": len(activity_lines),
-            "Actions et compléments de communication": "\n\n".join(activity_lines) if activity_lines else "Aucun complément enregistré",
+            "Nombre d’actions de communication": len(activity_lines),
+            "Actions de communication": "\n\n".join(activity_lines) if activity_lines else "Aucune action de communication enregistrée",
         }])
         export_buttons(
             activity_report, f"rapport_unique_activite_{activity_id}",
@@ -4762,8 +4790,8 @@ def render_reports():
     # disponibles dans report_data pour les calculs et le PDF, mais ne sont pas dupliqués
     # en feuilles séparées lorsque leur contenu est déjà rassemblé dans un registre unique.
     _legacy_separate_sheets = {
-        "Communication", "Médias", "Audiovisuel", "Formats", "Compléments de communication",
-        "Compléments historiques sans rattachement", "Profils chercheurs", "Détail actions valorisation",
+        "Communication", "Médias", "Audiovisuel", "Formats", "Actions de communication",
+        "Actions historiques sans rattachement", "Profils chercheurs", "Détail actions valorisation",
         "Publications scientifiques — ressources",
         "Résultats scientifiques", "Résultats scientifiques — regroupés",
     }
@@ -4801,8 +4829,8 @@ def render_reports():
     # ============================================================
     st.markdown("### 👁️ Aperçu du rapport")
 
-    with st.expander("📣 02 — Communication — activités et Compléments de communication", expanded=True):
-        st.markdown("**Une ligne par activité : activité et ensemble des compléments dans une seule fiche**")
+    with st.expander("📣 02 — Communication — activités et Actions de communication", expanded=True):
+        st.markdown("**Une ligne par activité : activité et ensemble des actions de communication dans une seule fiche**")
         st.dataframe(report_data["Activités"], use_container_width=True, hide_index=True)
 
     with st.expander("📚 03 — Documentations"):
