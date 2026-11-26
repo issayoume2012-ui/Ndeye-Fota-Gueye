@@ -2392,7 +2392,7 @@ def _assistant_wants_all(question):
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _assistant_db_schema():
-    """Lit le schéma réel afin de rester compatible avec les anciennes bases déployées."""
+    """Lit le schéma réel, en conservant les colonnes compatibles avec la recherche."""
     rows = q(
         """SELECT table_name, column_name, data_type
            FROM information_schema.columns
@@ -2406,12 +2406,42 @@ def _assistant_db_schema():
         column = row.get("column_name")
         data_type = str(row.get("data_type") or "").lower()
         if not table or not column or data_type == "bytea": continue
-        # Les identifiants techniques nécessaires à la recherche sont gardés,
-        # mais aucun secret ni hash de mot de passe ne quitte la base.
         column_lower = column.lower()
         if any(marker in column_lower for marker in ("password", "secret", "token", "api_key")): continue
         schema.setdefault(table, []).append(column)
     return schema
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _assistant_db_temporal_columns():
+    """Retourne uniquement les colonnes SQL réellement typées date/heure."""
+    rows = q(
+        """SELECT table_name, column_name, data_type
+           FROM information_schema.columns
+           WHERE table_schema = current_schema()
+             AND data_type IN ('date', 'timestamp without time zone',
+                               'timestamp with time zone')""",
+        fetch=True, timeout_ms=5000,
+    ) or []
+    result = {}
+    for row in rows:
+        result.setdefault(row.get("table_name"), []).append(row.get("column_name"))
+    return result
+
+
+def _assistant_parse_period(question):
+    """Interprète les mois français, années et périodes explicites."""
+    folded = unicodedata.normalize("NFKD", (question or "").lower())
+    folded = "".join(ch for ch in folded if not unicodedata.combining(ch))
+    months = {
+        "janvier": 1, "fevrier": 2, "mars": 3, "avril": 4, "mai": 5,
+        "juin": 6, "juillet": 7, "aout": 8, "septembre": 9,
+        "octobre": 10, "novembre": 11, "decembre": 12,
+    }
+    month = next((number for name, number in months.items() if re.search(rf"\b{name}\b", folded)), None)
+    year_match = re.search(r"\b(?:19|20)\d{2}\b", folded)
+    year = int(year_match.group(0)) if year_match else None
+    return month, year
 
 
 def _assistant_search_site(question):
@@ -2460,6 +2490,8 @@ def _assistant_search_site(question):
         "⚙️ Administration": ("compte", "utilisateur", "administrateur", "preuve", "justificatif", "association"),
     }
     question_lower = question.lower()
+    requested_month, requested_year = _assistant_parse_period(question_lower)
+    temporal_columns = _assistant_db_temporal_columns()
     all_site_request = any(token in question_lower for token in ("tout le site", "toutes les données", "toutes les donnees", "tout le système", "tout le systeme", "tout ce qui est enregistré", "tout ce qui est enregistre"))
     count_request = bool(re.search(r"\b(combien|nombre|total|compte|décompte|decompte|chiffre)\b", question_lower)) and not _assistant_wants_analysis(question)
     complete_request = _assistant_wants_all(question) and not count_request
@@ -2468,9 +2500,12 @@ def _assistant_search_site(question):
         relevant_pages = list(allowed_pages)
     relevant_pages = [page for page in relevant_pages if page in allowed_pages and page in AI_SEARCH_SOURCES]
     topic_words = {w for page in relevant_pages for w in hints.get(page, ()) if w in question_lower}
+    month_names = {"janvier", "fevrier", "février", "mars", "avril", "mai", "juin", "juillet", "aout", "août", "septembre", "octobre", "novembre", "decembre", "décembre"}
     terms = [
         term for term in re.findall(r"[\wÀ-ÿ-]{3,}", question_lower)
-        if term not in ignored and not any(term in topic or topic in term for topic in topic_words)
+        if term not in ignored and term not in month_names
+        and not re.fullmatch(r"(?:19|20)\d{2}", term)
+        and not any(term in topic or topic in term for topic in topic_words)
     ][:6]
 
     actual_schema = _assistant_db_schema()
@@ -2485,36 +2520,52 @@ def _assistant_search_site(question):
             # table, et ignore proprement celles absentes des anciennes bases.
             columns = actual_schema[table]
             searchable_columns = [column for column in columns if column != "id"]
-            if terms:
-                if not searchable_columns:
-                    continue
-                clauses, params = [], []
+            conditions, params = [], []
+            if terms and searchable_columns:
+                text_clauses = []
                 for term in terms:
-                    term_clauses = [f"CAST({col} AS TEXT) ILIKE ?" for col in searchable_columns]
-                    clauses.append("(" + " OR ".join(term_clauses) + ")")
+                    term_clauses = [f"CAST(\"{col}\" AS TEXT) ILIKE ?" for col in searchable_columns]
+                    text_clauses.append("(" + " OR ".join(term_clauses) + ")")
                     params.extend([f"%{term}%"] * len(searchable_columns))
-                # Une correspondance sur au moins un terme significatif suffit.
-                # Les formulations naturelles contiennent souvent des mots
-                # qui ne figurent pas tels quels dans les fiches ; le AND strict
-                # produisait donc fréquemment des résultats vides.
-                where_sql = " OR ".join(clauses)
-                requested_year = re.search(r"\b(?:19|20)\d{2}\b", question_lower)
-                if requested_year:
-                    year_fields = []
-                    year_params = []
-                    if "annee" in searchable_columns:
-                        year_fields.append("CAST(annee AS TEXT) = ?")
-                        year_params.append(requested_year.group(0))
-                    for column in searchable_columns:
-                        if column.startswith("date_") or column.endswith("_date"):
-                            year_fields.append(f"EXTRACT(YEAR FROM {column}) = ?")
-                            year_params.append(int(requested_year.group(0)))
-                    if year_fields:
-                        where_sql = f"({where_sql}) AND ({' OR '.join(year_fields)})"
-                        params.extend(year_params)
-                selected_sources.append((label, table, columns, where_sql, params))
-            else:
-                selected_sources.append((label, table, columns, None, []))
+                conditions.append("(" + " OR ".join(text_clauses) + ")")
+
+            # Le mois et l'année sont appliqués aux vraies colonnes date/heure,
+            # jamais recherchés comme de simples mots dans le contenu des fiches.
+            date_fields = [c for c in temporal_columns.get(table, []) if c in columns]
+            # Priorité aux dates métier (date_activite, date_consultation, etc.).
+            # created_at n'est utilisé qu'en l'absence d'une date métier.
+            business_date_fields = [c for c in date_fields if c.lower() != "created_at"]
+            if business_date_fields:
+                date_fields = business_date_fields
+            temporal_clauses = []
+            temporal_params = []
+            for column in date_fields:
+                quoted = f'"{column}"'
+                parts = []
+                if requested_month is not None:
+                    parts.append(f"EXTRACT(MONTH FROM {quoted}) = ?")
+                    temporal_params.append(requested_month)
+                if requested_year is not None:
+                    parts.append(f"EXTRACT(YEAR FROM {quoted}) = ?")
+                    temporal_params.append(requested_year)
+                if parts:
+                    temporal_clauses.append("(" + " AND ".join(parts) + ")")
+            if requested_month is not None or requested_year is not None:
+                # Les tables avec un champ métier 'annee' (publications, résultats)
+                # sont également filtrées par année, même sans colonne date SQL.
+                if requested_month is not None and not date_fields:
+                    continue
+                if temporal_clauses:
+                    conditions.append("(" + " OR ".join(temporal_clauses) + ")")
+                    params.extend(temporal_params)
+                elif requested_year is not None and "annee" in searchable_columns and requested_month is None:
+                    conditions.append('CAST("annee" AS TEXT) = ?')
+                    params.append(str(requested_year))
+                elif requested_year is not None:
+                    continue
+
+            where_sql = " AND ".join(conditions) if conditions else None
+            selected_sources.append((label, table, columns, where_sql, params))
 
     if not selected_sources:
         return []
