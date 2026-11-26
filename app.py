@@ -15,6 +15,8 @@ import urllib.error
 import socket
 import ssl
 import time
+import difflib
+import unicodedata
 
 try:
     from supabase import create_client, Client
@@ -2328,7 +2330,11 @@ def _assistant_question_needs_site_data(question):
         "rapport annuel", "rapport trimestriel", "rapport mensuel", "bilan des activités",
         "bilan des activites", "bilan annuel", "bilan trimestriel",
     )) and any(term in text for term in domain_terms)
-    return explicit or report_request or (bool(re.search(r"\b(?:19|20)\d{2}\b", text)) and any(term in text for term in domain_terms))
+    # Toute saisie non conversationnelle peut être une recherche : un nom seul,
+    # un nom mal orthographié ou un mot-clé ne doit pas être rejeté comme « sans contexte ».
+    normalized = re.sub(r"[^\wÀ-ÿ]+", " ", text).strip()
+    is_short_query = bool(normalized) and normalized not in {"bonjour", "salut", "bonsoir", "merci", "coucou", "help", "aide"}
+    return explicit or report_request or (bool(re.search(r"\b(?:19|20)\d{2}\b", text)) and any(term in text for term in domain_terms)) or is_short_query
 
 
 def _assistant_gemini_key():
@@ -2541,6 +2547,76 @@ def _assistant_search_site(question):
             ORDER BY rubrique, id DESC
         """
         rows = q(query, tuple(query_params), fetch=True, timeout_ms=30000) or []
+
+        # Deuxième passage tolérant : si la recherche exacte ne trouve rien,
+        # on compare les noms et textes des fiches avec une similarité souple.
+        # Cette approche ne dépend pas de l'extension PostgreSQL pg_trgm.
+        if len(rows) < 3 and terms:
+            fallback_branches = []
+            for label, table, columns, _, _ in selected_sources:
+                label_sql = label.replace("'", "''")
+                field_pairs = [f"'{column}', src.{column}" for column in columns]
+                record_sql = "jsonb_build_object(" + ", ".join(["'id', src.id"] + field_pairs) + ")"
+                fallback_branches.append(
+                    f"(SELECT '{label_sql}' AS rubrique, src.id, {record_sql} AS extrait "
+                    f"FROM {table} AS src ORDER BY src.id DESC LIMIT 500)"
+                )
+            fallback_sql = "SELECT rubrique, id, extrait FROM (" + " UNION ALL ".join(fallback_branches) + ") AS candidates"
+            candidates = q(fallback_sql, fetch=True, timeout_ms=30000) or []
+
+            def _fold_search_text(value):
+                value = unicodedata.normalize("NFKD", str(value or "").lower())
+                value = "".join(ch for ch in value if not unicodedata.combining(ch))
+                return re.sub(r"[^a-z0-9]+", " ", value).strip()
+
+            query_terms = [_fold_search_text(term) for term in terms if len(_fold_search_text(term)) >= 3]
+            exact_keys = {(r.get("rubrique"), r.get("id")) for r in rows}
+            for candidate in candidates:
+                record = candidate.get("extrait") or {}
+                if isinstance(record, str):
+                    try:
+                        record = json.loads(record)
+                    except Exception:
+                        record = {}
+                searchable_values = [_fold_search_text(value) for value in (record or {}).values() if value not in (None, "")]
+                searchable_words = [word for value in searchable_values for word in value.split()]
+                score = 0.0
+                for term in query_terms:
+                    if any(term in value for value in searchable_values):
+                        score += 1.0
+                    elif searchable_words:
+                        score += max(difflib.SequenceMatcher(None, term, word).ratio() for word in searchable_words)
+                candidate_key = (candidate.get("rubrique"), candidate.get("id"))
+                if query_terms and score / len(query_terms) >= 0.76 and candidate_key not in exact_keys:
+                    rows.append(candidate)
+                    exact_keys.add(candidate_key)
+
+        # Lorsqu'une personne est retrouvée, remonte aussi ses participations
+        # afin de relier le nom à ses activités plutôt que de renvoyer une fiche isolée.
+        people_ids = []
+        for matched in rows:
+            if matched.get("rubrique") == "Personnes":
+                matched_record = matched.get("extrait") or {}
+                if isinstance(matched_record, str):
+                    try:
+                        matched_record = json.loads(matched_record)
+                    except Exception:
+                        matched_record = {}
+                if isinstance(matched_record, dict) and matched_record.get("id") is not None:
+                    people_ids.append(int(matched_record["id"]))
+        if people_ids and "participants" in actual_schema and "person_id" in actual_schema["participants"]:
+            placeholders = ",".join(["?"] * len(set(people_ids)))
+            participant_columns = [c for c in actual_schema["participants"] if c != "id"]
+            participant_pairs = [f"'{column}', p.\"{column}\"" for column in participant_columns]
+            participant_json = "jsonb_build_object(" + ", ".join(["'id', p.id"] + participant_pairs) + ")"
+            participant_rows = q(
+                f"SELECT 'Participants' AS rubrique, p.id, {participant_json} AS extrait "
+                f"FROM participants p WHERE p.person_id IN ({placeholders}) ORDER BY p.id DESC LIMIT 500",
+                tuple(sorted(set(people_ids))), fetch=True, timeout_ms=15000,
+            ) or []
+            known_participant_ids = {r.get("id") for r in rows if r.get("rubrique") == "Participants"}
+            rows.extend(r for r in participant_rows if r.get("id") not in known_participant_ids)
+
         results_by_label = {
             label: {"rubrique": label, "table": table, "page": page_name, "correspondances_recherche": 0, "extraits": []}
             for page_name, tables in AI_SEARCH_SOURCES.items()
@@ -3145,6 +3221,15 @@ def render_ai_assistant():
                                 answer = _ask_gemini(question, context, st.session_state.ai_assistant_history)
                             else:
                                 answer = count_answer
+                        elif context_is_database and not context:
+                            answer = (
+                                f"Je n’ai trouvé aucune correspondance exacte ou approchante pour **« {question.strip()} »** "
+                                "dans les rubriques auxquelles votre compte a accès.\n\n"
+                                "Vous pouvez essayer une autre orthographe, un nom plus court ou un mot-clé. "
+                                "Pour un nom de personne, je peux notamment rechercher dans les personnes, "
+                                "participants, profils de chercheurs, auteurs et visiteurs selon vos autorisations. "
+                                "Vérifiez également les accents, les espaces et les éventuelles variantes du nom."
+                            )
                         else:
                             if not _assistant_gemini_key():
                                 raise RuntimeError("La clé GEMINI_API_KEY est absente des secrets Streamlit.")
